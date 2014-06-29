@@ -37,7 +37,7 @@ class IndexTreeBuilderTest {
   def nonUniformRandomTest() {
     val random = new scala.util.Random(0L)
     val data = (0 until 1000000).map(_ => math.pow(10, random.nextDouble() *10).toLong).toArray.sorted.distinct
-    val builder = new IndexTreeBuilder()
+    val builder = new IndexTreeBuilder()(IndexTreeContext(32))
     builder ++= data
     val tree = builder.tree.get
     //IndexTree.debugPrint(tree)
@@ -46,10 +46,11 @@ class IndexTreeBuilderTest {
 
   @Test
   def leafInsertBugTest() {
-    val random = new scala.util.Random(0L)
-    val data = (0 until 1000000).map(_ => math.pow(10, random.nextDouble() *10).toLong).toArray.sorted.distinct
-    val builder = new IndexTreeBuilder()
-    val test = data.drop(143287).take(36)
+    val test = Array[Long](
+      755148,755232,755243,755295,755302,755314,755321,755331,755338,755351,755395,755398,755404,755456,755458,755459,
+      755484,755493,755494,755513,755516,755524,755533,755535,755539,755556,755565,755566,755589,755594,755601,755615,
+      755632,755652,755682,755716)
+    val builder = new IndexTreeBuilder()(IndexTreeContext(32))
     builder ++= test
     val tree = builder.tree.get
     //IndexTree.debugPrint(tree)
