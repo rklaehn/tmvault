@@ -39,4 +39,6 @@ private[core] object BitUtil {
   }
 
   def zero(value: Long, mask: Long) = (value & mask) == 0
+
+  def log2(value: Long) = java.lang.Long.bitCount(java.lang.Long.highestOneBit(value))
 }

@@ -1,6 +1,7 @@
 package tmvault.core
 
 import debox._
+import tmvault.core.IndexTree.Branch
 
 /**
  * Typeclass for index tree context values such as config settings and memo table
@@ -16,7 +17,7 @@ sealed abstract class IndexTree {
 
   def size: Long
 
-  def leafCount: Long
+  def leafCount: Int
 
   final def min: Long = prefix
 
@@ -68,6 +69,20 @@ class IndexTreeBuilder(implicit context:IndexTreeContext) {
         tree = insert(tree, chunks(i))
         i+=1
       }
+//      def print0(tree:IndexTree, indent:String) : Unit = {
+//        tree match {
+//          case tree:Branch =>
+//            if(indent.length<10) {
+//              println(indent + tree.center)
+//              print0(tree.left, indent + "  ")
+//              print0(tree.right, indent + "  ")
+//            }
+//          case _ =>
+//        }
+//      }
+//      println("=======")
+//      print0(tree.get, "")
+//      println("=======")
     }
   }
 
@@ -87,8 +102,9 @@ object IndexTree {
       case Leaf(prefix, level, data) =>
         println(s"${indent}Leaf($prefix, $level)")
         println(indent + "  " +data.mkString("[",",","]"))
-      case Branch(prefix, level, size, left, right) =>
-        println(s"${indent}Branch($prefix,$level,$size)")
+      case branch@Branch(prefix, level, size, left, right) =>
+        val marker = if(branch.leafCount == 1) ("*" + (left.leafCount + right.leafCount) + " ") else ""
+        println(s"${indent}${marker}Branch($prefix,$level,$size)")
         print0(left, indent + "  ")
         print0(right, indent + "  ")
     }
@@ -99,7 +115,7 @@ object IndexTree {
 
     def size = data.length
 
-    def leafCount = 1L
+    def leafCount = 1
 
     def split : (Leaf, Leaf) = {
       val index = firstIndexWhereGE(data, 0, data.length, center)
@@ -124,7 +140,13 @@ object IndexTree {
       right.copyToArray(target, offset + left.size.toInt)
     }
 
-    def leafCount = left.leafCount + right.leafCount
+    def leafCount = {
+      val sum = left.leafCount + right.leafCount
+      if(sum > 8)
+        1
+      else
+        sum
+    }
   }
 
   /*
@@ -145,16 +167,19 @@ object IndexTree {
     require(minSize >= 1)
     require(isIncreasing(data, from, until))
     val builder = Array.newBuilder[Array[Long]]
-    def chunk0(from: Int, until: Int): Unit =
-      if (until - from <= minSize)
-        builder += data.slice(from, until)
-      else {
+    def chunk0(from: Int, until: Int, indent:String): Unit =
+      if (until - from > minSize) {
         val pivot = center(data(from), data(until - 1))
+//        if(pivot == 755200)
+//          println(pivot)
+//        if(indent.length<10)
+//          println(indent + pivot)
         val splitIndex = firstIndexWhereGE(data, from, until, pivot)
-        chunk0(from, splitIndex)
-        chunk0(splitIndex, until)
-      }
-    chunk0(from, until)
+        chunk0(from, splitIndex, indent + "  ")
+        chunk0(splitIndex, until, indent + "  ")
+      } else
+        builder += data.slice(from, until)
+    chunk0(from, until, "")
     builder.result()
   }
 

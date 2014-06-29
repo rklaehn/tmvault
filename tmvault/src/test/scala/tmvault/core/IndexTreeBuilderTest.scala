@@ -34,6 +34,17 @@ class IndexTreeBuilderTest {
   }
 
   @Test
+  def nonUniformRandomTest() {
+    val random = new scala.util.Random(0L)
+    val data = (0 until 1000000).map(_ => math.pow(10, random.nextDouble() *10).toLong).toArray.sorted.distinct
+    val builder = new IndexTreeBuilder()
+    builder ++= data
+    val tree = builder.tree.get
+    //IndexTree.debugPrint(tree)
+    println(Stats(tree).histogramText)
+  }
+
+  @Test
   def fullMergeTest() {
     val random = new scala.util.Random(0L)
     val data1 = (0 until 1000).map(_ => random.nextInt(100000).toLong).toArray.sorted.distinct
@@ -47,6 +58,7 @@ class IndexTreeBuilderTest {
     val merged1 =tree1 merge tree2
     val merged2 =tree2 merge tree1
     IndexTree.debugPrint(merged1)
+    println(Stats(merged1).histogramText)
     println(merged1.size - tree1.size - tree2.size)
   }
 }
