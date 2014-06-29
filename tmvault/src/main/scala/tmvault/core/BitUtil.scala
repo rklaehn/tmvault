@@ -26,4 +26,17 @@ private[core] object BitUtil {
 
   def byte0(x: Int): Byte = (x >> 0).toByte
 
+  @inline
+  def toUnsigned(value: Long): Long = value - Long.MinValue
+
+  @inline
+  def unsignedCompare(a: Long, b: Long): Int = {
+    val va = toUnsigned(a)
+    val vb = toUnsigned(b)
+    if (va < vb) -1
+    else if (va > vb) +1
+    else 0
+  }
+
+  def zero(value: Long, mask: Long) = (value & mask) == 0
 }

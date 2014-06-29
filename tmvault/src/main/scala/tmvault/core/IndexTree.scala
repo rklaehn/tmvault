@@ -9,8 +9,6 @@ import debox._
 final case class IndexTreeContext(maxValues: Int)
 
 sealed abstract class IndexTree {
-  
-  import IndexTree._
 
   def prefix: Long
 
@@ -28,18 +26,17 @@ sealed abstract class IndexTree {
   
   final def mask = level * 2 - 1
 
-  final def merge(that:IndexTree)(implicit context:IndexTreeContext) : IndexTree = {
-    if(this.size + that.size < context.maxValues)
-      mkLeaf(this, that)
-    else if(disjoint(this, that))
-      mkBranch(this, that)
-    else
-      mergeOverlapping(that)
+  final def merge(that:IndexTree)(implicit context:IndexTreeContext) : IndexTree =
+    new Merge().apply(this, that)
+
+  def toArray : Array[Long] = {
+    require(size < Int.MaxValue)
+    val result = new Array[Long](size.toInt)
+    copyToArray(result, 0)
+    result
   }
 
   def copyToArray(target:Array[Long], offset:Int) : Unit
-
-  def mergeOverlapping(that:IndexTree)(implicit context:IndexTreeContext) : IndexTree
 }
 
 class IndexTreeBuilder(implicit context:IndexTreeContext) {
@@ -104,29 +101,28 @@ object IndexTree {
 
     def leafCount = 1L
 
-    override def copyToArray(target: Array[Long], offset: Int): Unit = ???
+    def split : (Leaf, Leaf) = {
+      val index = firstIndexWhereGE(data, 0, data.length, center)
+      val left = new Array[Long](index)
+      val right = new Array[Long](data.length - index)
+      System.arraycopy(data, 0, left, 0, left.length)
+      System.arraycopy(data, left.size, right, 0, right.length)
+      (mkLeaf(left), mkLeaf(right))
+    }
 
-    override def mergeOverlapping(that: IndexTree)(implicit context: IndexTreeContext): IndexTree = ???
+    override def copyToArray(target: Array[Long], offset: Int): Unit = {
+      System.arraycopy(data, 0, target, offset, data.length)
+    }
   }
 
   case class Branch(prefix: Long, level: Long, size: Long, left: IndexTree, right: IndexTree) extends IndexTree {
 
-    override def mergeOverlapping(that: IndexTree)(implicit context: IndexTreeContext): IndexTree = {
-      if(higher(this.level, that.level))
-        if(zero(that.prefix, this.level))
-          mkBranch(this.left merge that, this.right)
-        else
-          mkBranch(this.left, this.right merge that)
-      else /* if(shorter(that.level, this.level))
-        if(zero(this.prefix, that.level))
-          mkBranch(that.left merge this, that.right)
-        else
-          mkBranch(that.left, that.right merge this)
-      else */
-        ???
+    override def copyToArray(target: Array[Long], offset: Int): Unit = {
+      if(offset + size > target.length)
+        throw new IndexOutOfBoundsException()
+      left.copyToArray(target, offset)
+      right.copyToArray(target, offset + left.size.toInt)
     }
-
-    override def copyToArray(target: Array[Long], offset: Int): Unit = ???
 
     def leafCount = left.leafCount + right.leafCount
   }
@@ -205,26 +201,6 @@ object IndexTree {
     else
       Branch(prefix1, mask1, size1, b, a)
   }
-//
-//  def merge(a: IndexTree, b:IndexTree) : IndexTree = {
-//    val m1 = a.mask
-//    val p1 = a.prefix
-//    val m2 = b.mask
-//    val p2 = b.prefix
-//    if (shorter(m1, m2)) {
-//      if (!hasMatch(p2, p1, m1)) mkBranch(a, b)
-//      else if (zero(p2, m1)) mkBranch(a, b.mergep1, m1, l1.unionWith(that, f), r1)
-//      else LongMap.Bin(p1, m1, l1, r1.unionWith(that, f))
-//    } else if (shorter(m2, m1)) {
-//      if (!hasMatch(p1, p2, m2)) mkBranch(a, b)
-//      else if (zero(p1, m2)) LongMap.Bin(p2, m2, this.unionWith(l2, f), r2)
-//      else LongMap.Bin(p2, m2, l2, this.unionWith(r2, f))
-//    }
-//    else {
-//      if (p1 == p2) LongMap.Bin(p1, m1, l1.unionWith(l2, f), r1.unionWith(r2, f))
-//      else mkBranch(a, b)
-//    }
-//  }
 
   private def center(min: Long, max: Long): Long = {
     val bit = branchLevel(min, max)
