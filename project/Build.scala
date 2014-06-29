@@ -13,7 +13,10 @@ object Build extends sbt.Build {
 
   val debox = "org.spire-math" %% "debox" % "0.5.0"
 
-  val buildSettings = Defaults.defaultSettings ++ Seq(
+  val scoverageSettings = scoverage.ScoverageSbtPlugin.instrumentSettings ++ (scoverage.ScoverageSbtPlugin.ScoverageKeys.highlighting := true)
+
+
+  val buildSettings = Defaults.defaultSettings ++ scoverageSettings ++ Seq(
     organization := "rklaehn",
     version := "0.1-SNAPSHOT",
     scalaVersion := "2.11.1",
