@@ -45,6 +45,18 @@ class IndexTreeBuilderTest {
   }
 
   @Test
+  def leafInsertBugTest() {
+    val random = new scala.util.Random(0L)
+    val data = (0 until 1000000).map(_ => math.pow(10, random.nextDouble() *10).toLong).toArray.sorted.distinct
+    val builder = new IndexTreeBuilder()
+    val test = data.drop(143287).take(36)
+    builder ++= test
+    val tree = builder.tree.get
+    //IndexTree.debugPrint(tree)
+    println(Stats(tree).histogramText)
+  }
+
+  @Test
   def fullMergeTest() {
     val random = new scala.util.Random(0L)
     val data1 = (0 until 1000).map(_ => random.nextInt(100000).toLong).toArray.sorted.distinct
