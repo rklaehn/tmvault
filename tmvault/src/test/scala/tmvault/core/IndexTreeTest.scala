@@ -3,19 +3,19 @@ package tmvault.core
 import org.junit.Test
 import org.junit.Assert._
 
-class IndexTree2Test {
+class IndexTreeTest {
 
   @Test
   def testLeafCreation(): Unit = {
-    val leaf1 = IndexTree2.fromLong(12345L)
+    val leaf1 = IndexTree.fromLong(12345L)
     assertEquals(1, leaf1.width)
     assertEquals(12345L, leaf1.min)
 
-    val leaf2 = IndexTree2.fromLong(100000L)
+    val leaf2 = IndexTree.fromLong(100000L)
     assertEquals(1, leaf2.width)
     assertEquals(100000L, leaf2.min)
 
-    val leaf3 = IndexTree2.mkLeaf(Array[Long](0x0, 0xF))
+    val leaf3 = IndexTree.mkLeaf(Array[Long](0x0, 0xF))
     assertEquals(16, leaf3.width)
     assertEquals(0, leaf3.min)
   }
@@ -24,11 +24,11 @@ class IndexTree2Test {
     require(ArrayUtil.isIncreasing(data, 0, data.length))
     val random = new scala.util.Random(0)
     val shuffled = random.shuffle(data.toIndexedSeq).toArray
-    val tree1 = data.map(IndexTree2.fromLong).reduce(IndexTree2.merge)
-    val tree2 = shuffled.map(IndexTree2.fromLong).reduce(IndexTree2.merge)
-    val tree3 = data.map(IndexTree2.fromLong).reduceRight(IndexTree2.merge)
-    val tree4 = shuffled.map(IndexTree2.fromLong).reduceRight(IndexTree2.merge)
-    val tree5 = IndexTree2.fromLongs(data)
+    val tree1 = data.map(IndexTree.fromLong).reduce(IndexTree.merge)
+    val tree2 = shuffled.map(IndexTree.fromLong).reduce(IndexTree.merge)
+    val tree3 = data.map(IndexTree.fromLong).reduceRight(IndexTree.merge)
+    val tree4 = shuffled.map(IndexTree.fromLong).reduceRight(IndexTree.merge)
+    val tree5 = IndexTree.fromLongs(data)
     assertEquals(tree1, tree2)
     assertEquals(tree1, tree3)
     assertEquals(tree1, tree4)

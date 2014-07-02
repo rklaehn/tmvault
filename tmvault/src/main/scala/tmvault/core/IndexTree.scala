@@ -1,257 +1,227 @@
 package tmvault.core
 
-import debox._
-import tmvault.core.IndexTree.Branch
+import java.lang.Long.{highestOneBit, bitCount}
 
-/**
- * Typeclass for index tree context values such as config settings and memo table
- * @param maxValues the maximum number of allowed values (longs) in a leaf before it gets split
- */
-final case class IndexTreeContext(maxValues: Int)
+import scala.util.hashing.MurmurHash3
 
 sealed abstract class IndexTree {
 
-  def prefix: Long
+  /**
+   * The minimum value (inclusive) of the interval of this node
+   */
+  def min: Long
 
-  def level: Long
+  /**
+   * The maximum value (exclusive) of the interval of this node
+   */
+  final def max = min + width
 
-  def size: Long
+  /**
+   * The level of the node. Higher levels mean larger intervals. A value of 0 means a node with only one possible value,
+   * which should be extremely rare but must nevertheless be possible
+   */
+  def level: Int
 
-  def leafCount: Int
+  /**
+   * The width of the node
+   */
+  final def width = 1L << level
 
-  final def min: Long = prefix
+  /**
+   * The center of the node
+   */
+  final def center = min + width / 2
 
-  final def center = prefix + level
+  /**
+   * The bits of the min value that are the prefix
+   */
+  final def mask = -1L << level
 
-  final def max: Long = prefix + level * 2
-  
-  final def mask = level * 2 - 1
+  /**
+   * The right and left subtree of this node. In case of a leaf node, these have to be created on demand.
+   */
+  def split: (IndexTree, IndexTree)
 
-  final def merge(that:IndexTree)(implicit context:IndexTreeContext) : IndexTree =
-    new Merge().apply(this, that)
+  /**
+   * The number of elements in this tree. This is O(1) for all implementations
+   */
+  def size:Long
 
-  def toArray : Array[Long] = {
-    require(size < Int.MaxValue)
-    val result = new Array[Long](size.toInt)
-    copyToArray(result, 0)
-    result
-  }
+  /**
+   * Converts all elements to an array. This will fail if the size of the tree is more than 2^32 elements.
+   */
+  def toArray: Array[Long]
 
-  def copyToArray(target:Array[Long], offset:Int) : Unit
-}
-
-class IndexTreeBuilder(implicit context:IndexTreeContext) {
-
-  var buffer = Buffer.ofSize[Long](128)
-
-  var tree = Option.empty[IndexTree]
-
-  def ++=(values: Array[Long]) : Unit =
-    if(!values.isEmpty) {
-      require(buffer.isEmpty || buffer(buffer.length - 1) < values(0))
-      buffer ++= values
-      buildTree()
-    }
-
-  def +=(value: Long) : Unit = {
-    require(buffer.isEmpty || buffer(buffer.length - 1) < value)
-    buffer += value
-    buildTree()
-  }
-
-  private def buildTree() : Unit =  {
-    if (buffer.length > context.maxValues) {
-      val chunks = IndexTree.chunk(buffer.elems, 0, buffer.length, context.maxValues)
-      require(chunks.length > 1)
-      buffer = Buffer.unsafe(chunks.last)
-      var i = 0
-      while(i< chunks.length -1) {
-        tree = insert(tree, chunks(i))
-        i+=1
-      }
-//      def print0(tree:IndexTree, indent:String) : Unit = {
-//        tree match {
-//          case tree:Branch =>
-//            if(indent.length<10) {
-//              println(indent + tree.center)
-//              print0(tree.left, indent + "  ")
-//              print0(tree.right, indent + "  ")
-//            }
-//          case _ =>
-//        }
-//      }
-//      println("=======")
-//      print0(tree.get, "")
-//      println("=======")
-    }
-  }
-
-  private def insert(current:Option[IndexTree], chunk:Array[Long]) : Option[IndexTree] = {
-    val leaf = IndexTree.mkLeaf(chunk)
-    Some(current.map(_.merge(leaf)).getOrElse(leaf))
-  }
+  require(min == (min & mask))
 }
 
 object IndexTree {
-
-  import java.lang.Long.highestOneBit
   import ArrayUtil._
 
-  def debugPrint(tree: IndexTree): Unit = {
-    def print0(tree: IndexTree, indent: String) : Unit = tree match {
-      case Leaf(prefix, level, data) =>
-        println(s"${indent}Leaf($prefix, $level)")
-        println(indent + "  " +data.mkString("[",",","]"))
-      case branch@Branch(prefix, level, size, left, right) =>
-        val marker = if(branch.leafCount == 1) ("*" + (left.leafCount + right.leafCount) + " ") else ""
-        println(s"${indent}${marker}Branch($prefix,$level,$size)")
-        print0(left, indent + "  ")
-        print0(right, indent + "  ")
+  val maxSize = 32
+
+  def fromLong(value:Long) : IndexTree = mkLeaf(Array[Long](value))
+
+  def fromLongs(values:Array[Long]) : IndexTree = {
+    require(values.length > 0)
+    require(values.isIncreasing())
+    def mkNode(from:Int, until:Int) : IndexTree = {
+      if(until - from <= maxSize)
+        mkLeaf(values.slice(from, until))
+      else {
+        val a = values(from)
+        val b = values(until - 1)
+        val pivot = highestOneBit(a ^ b)
+        val mask = pivot - 1
+        val center = b & ~mask
+        val splitIndex = values.firstIndexWhereGE(center, from, until)
+        val left = mkNode(from, splitIndex)
+        val right = mkNode(splitIndex, until)
+        mkBranch(left, right)
+      }
     }
-    print0(tree, "")
+    mkNode(0, values.length)
   }
 
-  case class Leaf(prefix: Long, level: Long, data: Array[Long]) extends IndexTree {
+  def lines(tree:IndexTree, indent:String = "  ") : Traversable[String] = new Traversable[String] {
+    override def foreach[U](f: (String) => U): Unit = show(tree, indent)(x => f(x))
+  }
 
-    def size = data.length
+  def show(tree:IndexTree, indent:String = "  ")(f:String => Unit = println) : Unit = {
+    def show0(tree:IndexTree, prefix:String) : Unit = tree match {
+      case x:Leaf => f(prefix + x.toString)
+      case b:Branch =>
+        f(prefix + b.toString)
+        show0(b.left, prefix + indent)
+        show0(b.right, prefix + indent)
+    }
+    show0(tree, indent)
+  }
 
-    def leafCount = 1
+  def merge(a: IndexTree, b: IndexTree): IndexTree = {
+    if(a.size + b.size <= maxSize) {
+      val merged =
+        if(!overlap(a,b)) {
+          if (a.min < b.min)
+            a.toArray concat b.toArray
+          else
+            b.toArray concat a.toArray
+        } else {
+          (a.toArray concat b.toArray).sortedAndDistinct
+        }
+      mkLeaf(merged)
+    }
+    else if (!overlap(a, b)) {
+      // the two nodes do not overlap, so we can just create a branch node above them
+      mkBranch(a, b)
+    } else if (a.level > b.level) {
+      // a is above b
+      val (l,r) = a.split
+      if (b.min < a.center)
+        mkBranch(merge(l, b), r)
+      else
+        mkBranch(l, merge(r, b))
+    } else if (a.level < b.level) {
+      // b is above a
+      val (l,r) = b.split
+      if (a.min < b.center)
+        mkBranch(merge(a, l), r)
+      else
+        mkBranch(l, merge(a, r))
+    } else {
+      // a and b have the same interval
+      if(a.level == 0)
+        a
+      else {
+        val (al, ar) = a.split
+        val (bl, br) = b.split
+        mkBranch(merge(al, bl), merge(ar, br))
+      }
+    }
+  }
 
-    def split : (Leaf, Leaf) = {
-      val index = firstIndexWhereGE(data, 0, data.length, center)
-      val left = new Array[Long](index)
-      val right = new Array[Long](data.length - index)
-      System.arraycopy(data, 0, left, 0, left.length)
-      System.arraycopy(data, left.size, right, 0, right.length)
+  /**
+   * Returns true if a and b overlap, false if they are disjoint
+   */
+  def overlap(a: IndexTree, b: IndexTree): Boolean =
+    (a.min & b.mask) == (b.min & a.mask)
+
+  /**
+   * Creates a new branch node above two non-overlapping trees of arbitrary order
+   */
+  def mkBranch(a: IndexTree, b: IndexTree): Branch = {
+    require(!overlap(a, b))
+    val pivot = highestOneBit(a.min ^ b.min)
+    val mask = pivot | (pivot - 1)
+    val min = a.min & ~mask
+    val level = bitCount(mask)
+    if (a.min < b.min)
+      Branch(min, level, a, b)
+    else
+      Branch(min, level, b, a)
+  }
+
+  /**
+   * Creates a leaf from the given data
+   */
+  def mkLeaf(data: Array[Long]): Leaf = {
+    require(data.isIncreasing())
+    require(data(0) >= 0L)
+    if (data.length == 1)
+      Leaf(data(0), 0, data)
+    else {
+      val a = data(0)
+      val b = data(data.length - 1)
+      val pivot = highestOneBit(a ^ b)
+      val mask = pivot | (pivot - 1)
+      val min = a & ~mask
+      val level = bitCount(mask)
+      Leaf(min, level, data)
+    }
+  }
+
+  final case class Leaf(min: Long, level: Int, data: Array[Long]) extends IndexTree {
+
+    def split = {
+      if(level == 0)
+        throw new UnsupportedOperationException
+      val pivot = min + width / 2
+      val splitIndex = data.firstIndexWhereGE(pivot)
+      val left = data.takeUnboxed(splitIndex)
+      val right = data.dropUnboxed(splitIndex)
       (mkLeaf(left), mkLeaf(right))
     }
 
-    override def copyToArray(target: Array[Long], offset: Int): Unit = {
-      System.arraycopy(data, 0, target, offset, data.length)
+    def size = data.length
+
+    def toArray = data
+
+    override def hashCode(): Int =
+      MurmurHash3.arrayHash(data)
+
+    override def equals(obj: scala.Any): Boolean = obj match {
+      case that:Leaf => java.util.Arrays.equals(this.data, that.data)
+      case _ => false
+    }
+
+    override def toString = {
+      val dataText = data.mkString("[",",","]")
+      val reducedText = if(dataText.length > 60) dataText.take(57) + "..." else dataText
+      s"Leaf($min, $level, $size, $reducedText)"
     }
   }
 
-  case class Branch(prefix: Long, level: Long, size: Long, left: IndexTree, right: IndexTree) extends IndexTree {
+  final case class Branch(min: Long, level: Int, left: IndexTree, right: IndexTree) extends IndexTree {
+    require(min <= left.min && left.max <= center)
+    require(center <= right.min && right.max <= max)
 
-    override def copyToArray(target: Array[Long], offset: Int): Unit = {
-      if(offset + size > target.length)
-        throw new IndexOutOfBoundsException()
-      left.copyToArray(target, offset)
-      right.copyToArray(target, offset + left.size.toInt)
-    }
+    val size = left.size + right.size
 
-    def leafCount = {
-      val sum = left.leafCount + right.leafCount
-      if(sum > 8)
-        1
-      else
-        sum
-    }
+    def split = (left, right)
+
+    def toArray = left.toArray ++ right.toArray
+
+    override def toString: String = s"Branch($min, $level, $size)"
   }
 
-  /*
-  case class Reference(prefix: Long, level: Long, size:Long, hash: SHA1Hash) extends IndexTree {
-
-    override def mergeOverlapping(that: IndexTree)(implicit context: IndexTreeContext): IndexTree = ???
-  }
-  */
-
-  final def disjoint(a:IndexTree, b:IndexTree) : Boolean = {
-    val keep = ~(a.mask | b.mask)
-    val p0 = a.prefix & keep
-    val p1 = b.prefix & keep
-    p0 != p1
-  }
-
-  def chunk(data: Array[Long], from:Int, until:Int, minSize: Int): Array[Array[Long]] = {
-    require(minSize >= 1)
-    require(isIncreasing(data, from, until))
-    val builder = Array.newBuilder[Array[Long]]
-    def chunk0(from: Int, until: Int, indent:String): Unit =
-      if (until - from > minSize) {
-        val pivot = center(data(from), data(until - 1))
-//        if(pivot == 755200)
-//          println(pivot)
-//        if(indent.length<10)
-//          println(indent + pivot)
-        val splitIndex = firstIndexWhereGE(data, from, until, pivot)
-        chunk0(from, splitIndex, indent + "  ")
-        chunk0(splitIndex, until, indent + "  ")
-      } else
-        builder += data.slice(from, until)
-    chunk0(from, until, "")
-    builder.result()
-  }
-
-  def mkLeaf(a:IndexTree, b:IndexTree) : Leaf = {
-    val size = a.size + b.size
-    require(size < Int.MaxValue)
-    if(disjoint(a,b)) {
-      val data = new Array[Long](size.toInt)
-      a.copyToArray(data, 0)
-      b.copyToArray(data, a.size.toInt)
-      java.util.Arrays.sort(data)
-      mkLeaf(data)
-    } else {
-      val data = new Array[Long](size.toInt)
-      a.copyToArray(data, 0)
-      b.copyToArray(data, a.size.toInt)
-      java.util.Arrays.sort(data)
-      val remaining = removeDuplicates(data, 0, data.length)
-      if(remaining != data.length) {
-        val temp = new Array[Long](remaining)
-        System.arraycopy(data, 0, temp, 0, remaining)
-        mkLeaf(temp)
-      } else
-        mkLeaf(data)
-    }
-  }
-
-  def mkLeaf(data: Array[Long]): Leaf = {
-    assert(isIncreasing(data, 0, data.length))
-    assert(data.length > 0)
-    val min = data(0)
-    val max = data(data.length - 1)
-    val level = branchLevel(min, max)
-    val prefix = min & ~(level * 2 - 1)
-    Leaf(prefix, level, data)
-  }
-
-  def mkBranch(a: IndexTree, b: IndexTree): IndexTree = {
-    val mask1 = branchLevel(a.prefix, b.prefix)
-    val prefix1 = mask(a.prefix, mask1)
-    val size1 = a.size + b.size
-    if (zero(a.prefix, mask1))
-      Branch(prefix1, mask1, size1, a, b)
-    else
-      Branch(prefix1, mask1, size1, b, a)
-  }
-
-  private def center(min: Long, max: Long): Long = {
-    val bit = branchLevel(min, max)
-    val prefix = mask(min, bit)
-    prefix | bit
-  }
-
-  private def toUnsigned(value: Long): Long = value - Long.MinValue
-
-  private def unsignedCompare(a: Long, b: Long): Int = {
-    val va = toUnsigned(a)
-    val vb = toUnsigned(b)
-    if (va < vb) -1
-    else if (va > vb) +1
-    else 0
-  }
-
-  private def hasMatch(key: Long, prefix: Long, m: Long) = mask(key, m) == prefix
-
-  private def unsignedLT(i: Long, j: Long) = (i < j) ^ (i < 0L) ^ (j < 0L)
-
-  private def higher(m1: Long, m2: Long) = unsignedLT(m2, m1)
-
-  private def zero(value: Long, mask: Long) = (value & mask) == 0
-
-  private def mask(value: Long, bit: Long): Long = value & ~(bit | (bit - 1))
-
-  private def branchLevel(i: Long, j: Long): Long = highestOneBit(i ^ j)
 }
