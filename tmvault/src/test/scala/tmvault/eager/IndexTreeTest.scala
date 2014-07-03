@@ -23,8 +23,13 @@ class IndexTreeTest {
     assertEquals(0, leaf3.min)
   }
 
+  def areEqual(a:IndexTree, b:IndexTree) : Boolean = {
+    a == b
+  }
+
   def compareCreation(data: Array[Long]) = {
     import scala.concurrent.duration._
+    val timeout = 1.hour
     require(ArrayUtil.isIncreasing(data, 0, data.length))
     implicit val c = IndexTreeContext(ExecutionContext.global, null, 32)
     import c.executionContext
@@ -35,11 +40,11 @@ class IndexTreeTest {
       yield m
     def reduceLeft(elems: Array[Long]) = elems.map(x => Future.successful(IndexTree.fromLong(x))).reduceLeft(combine)
     def reduceRight(elems: Array[Long]) = elems.map(x => Future.successful(IndexTree.fromLong(x))).reduceRight(combine)
-    val tree1 = Await.result(reduceLeft(data), 1.minute)
-    val tree2 = Await.result(reduceLeft(shuffled), 1.minute)
-    val tree3 = Await.result(reduceRight(data), 1.minute)
-    val tree4 = Await.result(reduceRight(shuffled), 1.minute)
-    val tree5 = Await.result(IndexTree.fromLongs(data), 1.minute)
+    val tree1 = Await.result(reduceLeft(data), timeout)
+    val tree2 = Await.result(reduceLeft(shuffled), timeout)
+    val tree3 = Await.result(reduceRight(data), timeout)
+    val tree4 = Await.result(reduceRight(shuffled), timeout)
+    val tree5 = Await.result(IndexTree.fromLongs(data), timeout)
     assertEquals(tree1, tree2)
     assertEquals(tree1, tree3)
     assertEquals(tree1, tree4)
