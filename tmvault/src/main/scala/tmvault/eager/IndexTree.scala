@@ -2,6 +2,7 @@ package tmvault.eager
 
 import java.lang.Long.{bitCount, highestOneBit}
 
+import tmvault.eager.IndexTree.Reference
 import tmvault.util.{SHA1Hash, ArrayUtil}
 
 import scala.concurrent.Future
@@ -57,15 +58,26 @@ sealed abstract class IndexTree {
   def size: Long
 
   /**
+   * This is used to determine whether to place an indirection above this node
+   */
+  def weight: Int
+
+  /**
    * Converts all elements to an array. This will fail if the size of the tree is more than 2^32 elements.
    */
-  def copyToArray(target:Array[Long], offset:Int)(implicit c: IndexTreeContext): Future[Unit]
+  def copyToArray(target: Array[Long], offset: Int)(implicit c: IndexTreeContext): Future[Unit]
 
   final def toArray(implicit c: IndexTreeContext) = {
     import c.executionContext
     val target = new Array[Long](size.toInt)
     copyToArray(target, 0).map(_ => target)
   }
+
+  final def references : Traversable[Reference] = new Traversable[Reference] {
+    override def foreach[U](f: (Reference) => U): Unit = foreachReference(f)
+  }
+
+  protected def foreachReference[U](f:Reference => U) : Unit
 
   require(min == (min & mask))
 }
@@ -74,7 +86,7 @@ object IndexTree {
 
   import tmvault.util.ArrayUtil._
 
-  def fromLong(value: Long): IndexTree = mkLeaf(Array[Long](value))
+  def fromLong(value: Long): Future[IndexTree] = Future.successful(mkLeaf(Array[Long](value)))
 
   def fromLongs(values: Array[Long])(implicit c: IndexTreeContext): Future[IndexTree] = {
     require(values.length > 0)
@@ -122,28 +134,26 @@ object IndexTree {
       for {
         _ <- a.copyToArray(temp, 0)
         _ <- b.copyToArray(temp, a.size.toInt)
-      } yield {
-        mkLeaf(temp.sortedAndDistinct)
-      }
-    }
-    else if (!overlap(a, b)) {
+        r <- wrap(mkLeaf(temp.sortedAndDistinct))
+      } yield r
+    } else if (!overlap(a, b)) {
       // the two nodes do not overlap, so we can just create a branch node above them
-      Future.successful(mkBranch(a, b))
+      wrap(mkBranch(a, b))
     } else if (a.level > b.level) {
       // a is above b
       a.split.flatMap { case (l, r) =>
         if (b.min < a.center)
-          merge(l, b).map(mkBranch(_, r))
+          merge(l, b).flatMap(l => wrap(mkBranch(l, r)))
         else
-          merge(r, b).map(mkBranch(l, _))
+          merge(r, b).flatMap(r => wrap(mkBranch(l, r)))
       }
     } else if (a.level < b.level) {
       // b is above a
       b.split.flatMap { case (l, r) =>
         if (a.min < b.center)
-          merge(a, l).map(mkBranch(_, r))
+          merge(a, l).flatMap(l => wrap(mkBranch(l, r)))
         else
-          merge(a, r).map(mkBranch(l, _))
+          merge(a, r).flatMap(r => wrap(mkBranch(l, r)))
       }
     } else {
       // a and b have the same interval
@@ -156,7 +166,8 @@ object IndexTree {
           (bl, br) <- b.split
           l <- merge(al, bl)
           r <- merge(br, bl)
-        } yield mkBranch(l, r)
+          r <- wrap(mkBranch(l, r))
+        } yield r
       }
     }
   }
@@ -166,6 +177,14 @@ object IndexTree {
    */
   def overlap(a: IndexTree, b: IndexTree): Boolean =
     (a.min & b.mask) == (b.min & a.mask)
+
+  def wrap(a: IndexTree)(implicit c: IndexTreeContext): Future[IndexTree] = {
+    import c.executionContext
+    if (a.weight < c.maxWeight)
+      Future.successful(a)
+    else
+      c.blockStore.put(a).map(hash => Reference(a.min, a.level, a.size, hash))
+  }
 
   /**
    * Creates a new branch node above two non-overlapping trees of arbitrary order
@@ -203,6 +222,8 @@ object IndexTree {
 
   final case class Leaf(min: Long, level: Int, data: Array[Long]) extends IndexTree {
 
+    def weight = Integer.MAX_VALUE
+
     def split(implicit c: IndexTreeContext): Future[(IndexTree, IndexTree)] = {
       if (level == 0)
         throw new UnsupportedOperationException
@@ -218,6 +239,9 @@ object IndexTree {
     override def copyToArray(target: Array[Long], offset: Int)(implicit c: IndexTreeContext): Future[Unit] = {
       System.arraycopy(data, 0, target, offset, data.length)
       Future.successful(())
+    }
+
+    override protected def foreachReference[U](f: (Reference) => U): Unit = {
     }
 
     override def hashCode(): Int =
@@ -241,6 +265,8 @@ object IndexTree {
 
     val size = left.size + right.size
 
+    def weight = left.weight + right.weight
+
     def split(implicit c: IndexTreeContext) = Future.successful((left, right))
 
     override def copyToArray(target: Array[Long], offset: Int)(implicit c: IndexTreeContext): Future[Unit] = {
@@ -252,11 +278,18 @@ object IndexTree {
     }
 
     override def toString: String = s"Branch($min, $level, $size)"
+
+    override protected def foreachReference[U](f: (Reference) => U): Unit = {
+      left.foreachReference(f)
+      right.foreachReference(f)
+    }
   }
 
   final case class Reference(min: Long, level: Int, size: Long, hash: SHA1Hash) extends IndexTree {
 
-    def getChild(implicit c:IndexTreeContext) = c.blockStore.get(hash)
+    def weight = 20
+
+    def getChild(implicit c: IndexTreeContext) = c.blockStore.get(hash)
 
     def split(implicit c: IndexTreeContext) = {
       import c.executionContext
@@ -268,9 +301,11 @@ object IndexTree {
 
     override def copyToArray(target: Array[Long], offset: Int)(implicit c: IndexTreeContext): Future[Unit] = {
       import c.executionContext
-      for(child <- getChild)
+      for (child <- getChild)
       yield child.copyToArray(target, offset)
     }
+
+    override protected def foreachReference[U](f: (Reference) => U): Unit = f(this)
   }
 
 }

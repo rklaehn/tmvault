@@ -8,6 +8,6 @@ import scala.concurrent.ExecutionContext
  * @param blockStore the block store to store and load blocks
  * @param maxValues the maximum number of values (longs) we want in a leaf
  */
-case class IndexTreeContext(ec:ExecutionContext, blockStore:BlockStore[IndexTree], maxValues:Int) {
+case class IndexTreeContext(ec:ExecutionContext, blockStore:BlockStore[IndexTree], maxValues:Int, maxWeight:Int) {
   implicit def executionContext = ec
 }

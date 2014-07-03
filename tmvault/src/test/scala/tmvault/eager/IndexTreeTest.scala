@@ -10,11 +10,11 @@ class IndexTreeTest {
 
   @Test
   def testLeafCreation(): Unit = {
-    val leaf1 = IndexTree.fromLong(12345L)
+    val leaf1 = IndexTree.mkLeaf(Array(12345L))
     assertEquals(1, leaf1.width)
     assertEquals(12345L, leaf1.min)
 
-    val leaf2 = IndexTree.fromLong(100000L)
+    val leaf2 = IndexTree.mkLeaf(Array(100000L))
     assertEquals(1, leaf2.width)
     assertEquals(100000L, leaf2.min)
 
@@ -31,15 +31,15 @@ class IndexTreeTest {
     import scala.concurrent.duration._
     val timeout = 1.hour
     require(ArrayUtil.isIncreasing(data, 0, data.length))
-    implicit val c = IndexTreeContext(ExecutionContext.global, null, 32)
+    implicit val c = IndexTreeContext(ExecutionContext.global, null, 32, 32)
     import c.executionContext
     val random = new scala.util.Random(0)
     val shuffled = random.shuffle(data.toIndexedSeq).toArray
     def combine(a:Future[IndexTree], b:Future[IndexTree]) : Future[IndexTree] =
       for (a <- a; b <- b; m <- IndexTree.merge(a, b))
       yield m
-    def reduceLeft(elems: Array[Long]) = elems.map(x => Future.successful(IndexTree.fromLong(x))).reduceLeft(combine)
-    def reduceRight(elems: Array[Long]) = elems.map(x => Future.successful(IndexTree.fromLong(x))).reduceRight(combine)
+    def reduceLeft(elems: Array[Long]) = elems.map(IndexTree.fromLong).reduceLeft(combine)
+    def reduceRight(elems: Array[Long]) = elems.map(IndexTree.fromLong).reduceRight(combine)
     val tree1 = Await.result(reduceLeft(data), timeout)
     val tree2 = Await.result(reduceLeft(shuffled), timeout)
     val tree3 = Await.result(reduceRight(data), timeout)

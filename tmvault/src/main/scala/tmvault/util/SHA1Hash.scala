@@ -16,6 +16,14 @@ final class SHA1Hash private(private val part1: Long, private val part2: Long, p
 
   def ^(that: SHA1Hash) = new SHA1Hash(this.part1 ^ that.part1, this.part2 ^ that.part2, this.part3 ^ that.part3)
 
+  def copyToArray(target: Array[Byte], offset: Int): Unit = {
+    var i = 0
+    while (i < 20) {
+      target(offset + i) = apply(i)
+      i += 1
+    }
+  }
+
   def apply(index: Int): Byte = {
     import tmvault.util.BitUtil._
     index match {
@@ -65,6 +73,10 @@ object SHA1Hash {
     hasher.reset()
     hasher.update(data)
     apply(ByteBuffer.wrap(hasher.digest))
+  }
+
+  def fromArray(bytes:Array[Byte], offset:Int) : SHA1Hash = {
+    ???
   }
 
   def apply(buffer: ByteBuffer) = {
