@@ -2,7 +2,7 @@ package tmvault.eager
 
 import java.lang.Long.{bitCount, highestOneBit}
 
-import tmvault.util.ArrayUtil
+import tmvault.util.{SHA1Hash, ArrayUtil}
 
 import scala.concurrent.Future
 import scala.util.hashing.MurmurHash3
@@ -59,7 +59,13 @@ sealed abstract class IndexTree {
   /**
    * Converts all elements to an array. This will fail if the size of the tree is more than 2^32 elements.
    */
-  def toArray(implicit c: IndexTreeContext): Array[Long]
+  def copyToArray(target:Array[Long], offset:Int)(implicit c: IndexTreeContext): Future[Unit]
+
+  final def toArray(implicit c: IndexTreeContext) = {
+    import c.executionContext
+    val target = new Array[Long](size.toInt)
+    copyToArray(target, 0).map(_ => target)
+  }
 
   require(min == (min & mask))
 }
@@ -112,16 +118,13 @@ object IndexTree {
   def merge(a: IndexTree, b: IndexTree)(implicit c: IndexTreeContext): Future[IndexTree] = {
     import c.executionContext
     if (a.size + b.size <= c.maxValues) {
-      val leafData =
-        if (!overlap(a, b)) {
-          if (a.min < b.min)
-            a.toArray concat b.toArray
-          else
-            b.toArray concat a.toArray
-        } else {
-          (a.toArray concat b.toArray).sortedAndDistinct
-        }
-      Future.successful(mkLeaf(leafData))
+      val temp = new Array[Long]((a.size + b.size).toInt)
+      for {
+        _ <- a.copyToArray(temp, 0)
+        _ <- b.copyToArray(temp, a.size.toInt)
+      } yield {
+        mkLeaf(temp.sortedAndDistinct)
+      }
     }
     else if (!overlap(a, b)) {
       // the two nodes do not overlap, so we can just create a branch node above them
@@ -149,10 +152,10 @@ object IndexTree {
         Future.successful(a)
       } else {
         for {
-          (al,ar) <- a.split
-          (bl,br) <- b.split
-          l <- merge(al,bl)
-          r <- merge(br,bl)
+          (al, ar) <- a.split
+          (bl, br) <- b.split
+          l <- merge(al, bl)
+          r <- merge(br, bl)
         } yield mkBranch(l, r)
       }
     }
@@ -212,7 +215,10 @@ object IndexTree {
 
     def size = data.length
 
-    def toArray(implicit c: IndexTreeContext) = data
+    override def copyToArray(target: Array[Long], offset: Int)(implicit c: IndexTreeContext): Future[Unit] = {
+      System.arraycopy(data, 0, target, offset, data.length)
+      Future.successful(())
+    }
 
     override def hashCode(): Int =
       MurmurHash3.arrayHash(data)
@@ -237,9 +243,34 @@ object IndexTree {
 
     def split(implicit c: IndexTreeContext) = Future.successful((left, right))
 
-    def toArray(implicit c: IndexTreeContext) = left.toArray ++ right.toArray
+    override def copyToArray(target: Array[Long], offset: Int)(implicit c: IndexTreeContext): Future[Unit] = {
+      import c.executionContext
+      for {
+        _ <- left.copyToArray(target, offset)
+        _ <- right.copyToArray(target, offset + left.size.toInt)
+      } yield ()
+    }
 
     override def toString: String = s"Branch($min, $level, $size)"
+  }
+
+  final case class Reference(min: Long, level: Int, size: Long, hash: SHA1Hash) extends IndexTree {
+
+    def getChild(implicit c:IndexTreeContext) = c.blockStore.get(hash)
+
+    def split(implicit c: IndexTreeContext) = {
+      import c.executionContext
+      for {
+        child <- getChild
+        lr <- child.split
+      } yield lr
+    }
+
+    override def copyToArray(target: Array[Long], offset: Int)(implicit c: IndexTreeContext): Future[Unit] = {
+      import c.executionContext
+      for(child <- getChild)
+      yield child.copyToArray(target, offset)
+    }
   }
 
 }
