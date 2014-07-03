@@ -1,9 +1,14 @@
-package tmvault.core
+package tmvault.reference
 
 import java.lang.Long.{highestOneBit, bitCount}
 
+import tmvault.util.ArrayUtil
+
 import scala.util.hashing.MurmurHash3
 
+/**
+ * The reference version of the index tree.
+ */
 sealed abstract class IndexTree {
 
   /**
@@ -77,7 +82,7 @@ object IndexTree {
         val splitIndex = values.firstIndexWhereGE(center, from, until)
         val left = mkNode(from, splitIndex)
         val right = mkNode(splitIndex, until)
-        mkBranch(left, right)
+        merge(left, right)
       }
     }
     mkNode(0, values.length)
@@ -100,7 +105,7 @@ object IndexTree {
 
   def merge(a: IndexTree, b: IndexTree): IndexTree = {
     if(a.size + b.size <= maxSize) {
-      val merged =
+      val leafData =
         if(!overlap(a,b)) {
           if (a.min < b.min)
             a.toArray concat b.toArray
@@ -109,7 +114,7 @@ object IndexTree {
         } else {
           (a.toArray concat b.toArray).sortedAndDistinct
         }
-      mkLeaf(merged)
+      mkLeaf(leafData)
     }
     else if (!overlap(a, b)) {
       // the two nodes do not overlap, so we can just create a branch node above them

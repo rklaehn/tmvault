@@ -1,4 +1,6 @@
-package tmvault.core
+package tmvault.util
+
+import tmvault.reference.IndexTree
 
 import scala.collection.immutable.{IntMap, LongMap}
 

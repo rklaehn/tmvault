@@ -1,7 +1,8 @@
-package tmvault.core
+package tmvault.reference
 
 import org.junit.Test
 import org.junit.Assert._
+import tmvault.util.ArrayUtil
 
 class IndexTreeTest {
 

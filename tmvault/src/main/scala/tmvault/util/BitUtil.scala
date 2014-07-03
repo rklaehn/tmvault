@@ -1,6 +1,6 @@
-package tmvault.core
+package tmvault.util
 
-private[core] object BitUtil {
+private[tmvault] object BitUtil {
 
   def byte7(x: Long): Byte = (x >> 56).toByte
 

@@ -1,4 +1,5 @@
-package tmvault.core
+package tmvault.util
+
 import org.junit._
 
 class SHA1HashTest {

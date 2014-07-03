@@ -1,7 +1,7 @@
-package tmvault.core
+package tmvault.util
 
-import java.nio.{ByteOrder, ByteBuffer}
-import java.security.{NoSuchAlgorithmException, MessageDigest}
+import java.nio.{ByteBuffer, ByteOrder}
+import java.security.{MessageDigest, NoSuchAlgorithmException}
 
 final class SHA1Hash private(private val part1: Long, private val part2: Long, private val part3: Int) {
 
@@ -17,7 +17,7 @@ final class SHA1Hash private(private val part1: Long, private val part2: Long, p
   def ^(that: SHA1Hash) = new SHA1Hash(this.part1 ^ that.part1, this.part2 ^ that.part2, this.part3 ^ that.part3)
 
   def apply(index: Int): Byte = {
-    import BitUtil._
+    import tmvault.util.BitUtil._
     index match {
       case 0 => byte0(part1)
       case 1 => byte1(part1)

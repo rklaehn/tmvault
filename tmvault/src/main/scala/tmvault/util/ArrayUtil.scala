@@ -1,6 +1,6 @@
-package tmvault.core
+package tmvault.util
 
-private[core] object ArrayUtil {
+private[tmvault] object ArrayUtil {
 
   implicit class ArrayOps(val data: Array[Long]) extends AnyVal {
 
