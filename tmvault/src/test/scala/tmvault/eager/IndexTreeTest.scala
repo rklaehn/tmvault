@@ -2,9 +2,11 @@ package tmvault.eager
 
 import org.junit.Assert._
 import org.junit.Test
+import tmvault.io.InMemoryBlockStore
 import tmvault.util.ArrayUtil
 
-import scala.concurrent.{Future, Await, ExecutionContext}
+import tmvault.{Future, Await}
+import scala.concurrent.{ExecutionContext}
 
 class IndexTreeTest {
 
@@ -31,7 +33,8 @@ class IndexTreeTest {
     import scala.concurrent.duration._
     val timeout = 1.hour
     require(ArrayUtil.isIncreasing(data, 0, data.length))
-    implicit val c = IndexTreeContext(ExecutionContext.global, null, 32, 32)
+    val store = InMemoryBlockStore.create(ExecutionContext.global)
+    implicit val c = IndexTreeContext(ExecutionContext.global, store, 32, 32)
     import c.executionContext
     val random = new scala.util.Random(0)
     val shuffled = random.shuffle(data.toIndexedSeq).toArray
@@ -49,6 +52,18 @@ class IndexTreeTest {
     assertEquals(tree1, tree3)
     assertEquals(tree1, tree4)
     assertEquals(tree1, tree5)
+    println(store)
+  }
+
+  def createQuick(data: Array[Long]) = {
+    import scala.concurrent.duration._
+    val timeout = 1.hour
+    require(ArrayUtil.isIncreasing(data, 0, data.length))
+    val store = InMemoryBlockStore.create(ExecutionContext.global)
+    implicit val c = IndexTreeContext(ExecutionContext.global, store, 32, 32)
+    import c.executionContext
+    val tree5 = Await.result(IndexTree.fromLongs(data), timeout)
+    println(store)
   }
 
   @Test
@@ -59,15 +74,20 @@ class IndexTreeTest {
       val random = new scala.util.Random(0)
       (0 until 10000).map(_ => random.nextInt(100000).toLong).toArray.sorted.distinct
     }
-    val nonUniformRandom = {
+    val nonUniformRandomShort = {
       val random = new scala.util.Random(0)
-      (0 until 1000000).map(_ => math.pow(10, random.nextDouble() *10).toLong).toArray.sorted.distinct
+      (0 until 100000).map(_ => math.pow(10, random.nextDouble() *10).toLong).toArray.sorted.distinct
+    }
+    val nonUniformRandomLong = {
+      val random = new scala.util.Random(0)
+      (0 until 10000000).map(_ => math.pow(10, random.nextDouble() *10).toLong).toArray.sorted.distinct
     }
     val test = Seq(
-      nonUniformRandom,
       consecutive,
-      random
+      random,
+      nonUniformRandomShort
     )
+    createQuick(nonUniformRandomLong)
     for(data <- test)
       compareCreation(data)
   }

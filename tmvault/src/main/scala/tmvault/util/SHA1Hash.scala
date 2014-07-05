@@ -16,11 +16,11 @@ final class SHA1Hash private(private val part1: Long, private val part2: Long, p
 
   def ^(that: SHA1Hash) = new SHA1Hash(this.part1 ^ that.part1, this.part2 ^ that.part2, this.part3 ^ that.part3)
 
-  def copyToArray(target: Array[Byte], offset: Int): Unit = {
+  def copyToArray(target:Array[Byte], offset:Int) : Unit = {
     var i = 0
-    while (i < 20) {
+    while(i<20) {
       target(offset + i) = apply(i)
-      i += 1
+      i+=1
     }
   }
 
@@ -69,14 +69,10 @@ object SHA1Hash {
   val zero = new SHA1Hash(0,0,0)
 
   def hash(data: Array[Byte]) : SHA1Hash = {
-    val hasher = sha1Digest.get
-    hasher.reset()
-    hasher.update(data)
-    apply(ByteBuffer.wrap(hasher.digest))
-  }
-
-  def fromArray(bytes:Array[Byte], offset:Int) : SHA1Hash = {
-    ???
+    val digest = sha1Digest.get
+    digest.reset()
+    digest.update(data)
+    apply(ByteBuffer.wrap(digest.digest))
   }
 
   def apply(buffer: ByteBuffer) = {

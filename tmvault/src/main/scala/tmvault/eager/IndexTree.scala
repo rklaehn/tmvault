@@ -1,11 +1,14 @@
 package tmvault.eager
 
 import java.lang.Long.{bitCount, highestOneBit}
+import java.nio.{ByteBuffer, ByteOrder}
 
 import tmvault.eager.IndexTree.Reference
+import tmvault.io.BlockStore
 import tmvault.util.{SHA1Hash, ArrayUtil}
+import tmvault.io.BlockStore.Implicits._
+import tmvault.Future
 
-import scala.concurrent.Future
 import scala.util.hashing.MurmurHash3
 
 /**
@@ -50,7 +53,10 @@ sealed abstract class IndexTree {
    * - In case of a reference node, these have to be retrieved from a block store
    * therefore this method returns a future
    */
-  def split(implicit c: IndexTreeContext): Future[(IndexTree, IndexTree)]
+  def split(implicit c: IndexTreeContext): Future[(IndexTree, IndexTree)] =
+    Future.successful(splitNow)
+
+  def splitNow : (IndexTree, IndexTree)
 
   /**
    * The number of elements in this tree. This is O(1) for all implementations
@@ -83,6 +89,67 @@ sealed abstract class IndexTree {
 }
 
 object IndexTree {
+
+  class IndexTreeWritable(c:IndexTreeContext) extends BlockStore.Writable[IndexTree] {
+
+    override def toByteArray(value: IndexTree): Array[Byte] = value match {
+      case leaf:Leaf =>
+        val result = new Array[Byte](leaf.size.toInt * 8 + 2)
+        val buffer = ByteBuffer.wrap(result)
+        buffer.order(ByteOrder.LITTLE_ENDIAN)
+        buffer.put(0.toByte) // no compression
+        buffer.put(0.toByte) // index array
+        buffer.asLongBuffer().put(leaf.data)
+        buffer.array()
+        result
+      case branch:Branch =>
+        val references = branch.references.toArray
+        val result = new Array[Byte](references.length * 40 + 2)
+        val buffer = ByteBuffer.wrap(result)
+        buffer.order(ByteOrder.LITTLE_ENDIAN)
+        buffer.put(0.toByte) // no compression
+        buffer.put(1.toByte) // hash array
+        for(reference <- references) {
+          buffer.putInt(reference.level)
+          buffer.putLong(reference.min)
+          buffer.putLong(reference.size)
+          reference.hash.write(buffer)
+        }
+        result
+      case _ =>
+        throw new UnsupportedOperationException
+    }
+
+    override def fromByteArray(value: Array[Byte]): IndexTree = {
+      require(value.length >= 2)
+      require(value(0) == 0)
+      implicit def c = this.c
+      value(1).toInt match {
+        case 0 =>
+          val buffer = ByteBuffer.wrap(value)
+          buffer.order(ByteOrder.LITTLE_ENDIAN)
+          buffer.position(2)
+          val result = new Array[Long]((value.length - 2) / 8)
+          buffer.asLongBuffer().get(result)
+          mkLeaf(result)
+        case 1 =>
+          val buffer = ByteBuffer.wrap(value)
+          buffer.order(ByteOrder.LITTLE_ENDIAN)
+          buffer.position(2)
+          val count = (value.length - 2) / 40
+          val references = (0 until count) map { _ =>
+            val level = buffer.getInt()
+            val min = buffer.getLong()
+            val size = buffer.getLong()
+            val hash = SHA1Hash.apply(buffer)
+            Reference(min, level, size, hash) : IndexTree
+          }
+          references.reduce((a,b) => mergeEager(a,b))
+        case _ =>
+          throw new UnsupportedOperationException
+      }
+    }
+  }
 
   import tmvault.util.ArrayUtil._
 
@@ -127,8 +194,39 @@ object IndexTree {
     show0(tree, indent)
   }
 
+  private def mergeEager(a: IndexTree, b: IndexTree)(implicit c: IndexTreeContext): IndexTree = {
+    if (!overlap(a, b)) {
+      // the two nodes do not overlap, so we can just create a branch node above them
+      mkBranch(a, b)
+    } else if (a.level > b.level) {
+      // a is above b
+      val (l,r) = a.splitNow
+      if (b.min < a.center)
+        mkBranch(mergeEager(l, b), r)
+      else
+        mkBranch(l, mergeEager(r, b))
+    } else if (a.level < b.level) {
+      // b is above a
+      val (l,r) = b.splitNow
+      if (a.min < b.center)
+        mkBranch(mergeEager(a, l), r)
+      else
+        mkBranch(l, mergeEager(a, r))
+    } else {
+      // a and b have the same interval
+      if(a.level == 0)
+        a
+      else {
+        val (al, ar) = a.splitNow
+        val (bl, br) = b.splitNow
+        mkBranch(mergeEager(al, bl), mergeEager(ar, br))
+      }
+    }
+  }
+
   def merge(a: IndexTree, b: IndexTree)(implicit c: IndexTreeContext): Future[IndexTree] = {
     import c.executionContext
+
     if (a.size + b.size <= c.maxValues) {
       val temp = new Array[Long]((a.size + b.size).toInt)
       for {
@@ -138,7 +236,11 @@ object IndexTree {
       } yield r
     } else if (!overlap(a, b)) {
       // the two nodes do not overlap, so we can just create a branch node above them
-      wrap(mkBranch(a, b))
+      for {
+        a <- wrap(a)
+        b <- wrap(b)
+        r <- wrap(mkBranch(a, b))
+      } yield r
     } else if (a.level > b.level) {
       // a is above b
       a.split.flatMap { case (l, r) =>
@@ -180,16 +282,22 @@ object IndexTree {
 
   def wrap(a: IndexTree)(implicit c: IndexTreeContext): Future[IndexTree] = {
     import c.executionContext
+    implicit val w = new IndexTreeWritable(c)
     if (a.weight < c.maxWeight)
       Future.successful(a)
     else
-      c.blockStore.put(a).map(hash => Reference(a.min, a.level, a.size, hash))
+      c.blockStore.put(a).map { hash =>
+        import scala.concurrent.duration._
+        Reference(a.min, a.level, a.size, hash)
+      }
   }
 
   /**
    * Creates a new branch node above two non-overlapping trees of arbitrary order
    */
   def mkBranch(a: IndexTree, b: IndexTree): Branch = {
+    require(!a.isInstanceOf[Leaf])
+    require(!b.isInstanceOf[Leaf])
     require(!overlap(a, b))
     val pivot = highestOneBit(a.min ^ b.min)
     val mask = pivot | (pivot - 1)
@@ -224,14 +332,14 @@ object IndexTree {
 
     def weight = Integer.MAX_VALUE
 
-    def split(implicit c: IndexTreeContext): Future[(IndexTree, IndexTree)] = {
+    def splitNow: (IndexTree, IndexTree) = {
       if (level == 0)
         throw new UnsupportedOperationException
       val pivot = min + width / 2
       val splitIndex = data.firstIndexWhereGE(pivot)
       val left = data.takeUnboxed(splitIndex)
       val right = data.dropUnboxed(splitIndex)
-      Future.successful((mkLeaf(left), mkLeaf(right)))
+      (mkLeaf(left), mkLeaf(right))
     }
 
     def size = data.length
@@ -267,7 +375,7 @@ object IndexTree {
 
     def weight = left.weight + right.weight
 
-    def split(implicit c: IndexTreeContext) = Future.successful((left, right))
+    def splitNow = (left, right)
 
     override def copyToArray(target: Array[Long], offset: Int)(implicit c: IndexTreeContext): Future[Unit] = {
       import c.executionContext
@@ -289,14 +397,22 @@ object IndexTree {
 
     def weight = 20
 
-    def getChild(implicit c: IndexTreeContext) = c.blockStore.get(hash)
+    def getChild(implicit c: IndexTreeContext) = {
+      import c.executionContext
+      implicit val w = new IndexTreeWritable(c)
+      c.blockStore.get(hash)
+    }
 
-    def split(implicit c: IndexTreeContext) = {
+    def splitNow = throw new UnsupportedOperationException
+
+    override def split(implicit c: IndexTreeContext) = {
       import c.executionContext
       for {
         child <- getChild
-        lr <- child.split
-      } yield lr
+        (l,r) <- child.split
+        l <- wrap(l)
+        r <- wrap(r)
+      } yield (l,r)
     }
 
     override def copyToArray(target: Array[Long], offset: Int)(implicit c: IndexTreeContext): Future[Unit] = {

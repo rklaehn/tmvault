@@ -1,6 +1,6 @@
 package tmvault.util
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 
 /**
  * Like a future, except that it has less (no) overhead in case the value is already known at creation.
