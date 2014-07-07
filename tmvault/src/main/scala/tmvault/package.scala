@@ -6,6 +6,8 @@ package object tmvault {
 
   def Await = scala.concurrent.Await
 
+  def ExecutionContext = scala.concurrent.ExecutionContext
+
 //  type Future[T] = tmvault.util.Future[T]
 //
 //  def Future = tmvault.util.Future

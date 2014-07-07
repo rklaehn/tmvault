@@ -73,7 +73,7 @@ sealed abstract class IndexTree {
    */
   def copyToArray(target: Array[Long], offset: Int)(implicit c: IndexTreeContext): Future[Unit]
 
-  final def toArray(implicit c: IndexTreeContext) = {
+  final def toArray(implicit c: IndexTreeContext): Future[Array[Long]] = {
     import c.executionContext
     val target = new Array[Long](size.toInt)
     copyToArray(target, 0).map(_ => target)
@@ -417,8 +417,7 @@ object IndexTree {
 
     override def copyToArray(target: Array[Long], offset: Int)(implicit c: IndexTreeContext): Future[Unit] = {
       import c.executionContext
-      for (child <- getChild)
-      yield child.copyToArray(target, offset)
+      getChild.flatMap(_.copyToArray(target, offset))
     }
 
     override protected def foreachReference[U](f: (Reference) => U): Unit = f(this)

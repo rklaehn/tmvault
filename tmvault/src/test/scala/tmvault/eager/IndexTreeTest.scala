@@ -1,8 +1,11 @@
 package tmvault.eager
 
+import java.io.File
+import java.nio.file.Files
+
 import org.junit.Assert._
 import org.junit.Test
-import tmvault.io.InMemoryBlockStore
+import tmvault.io.{LevelDBBlockStore, InMemoryBlockStore}
 import tmvault.util.ArrayUtil
 
 import tmvault.{Future, Await}
@@ -60,10 +63,22 @@ class IndexTreeTest {
     val timeout = 1.hour
     require(ArrayUtil.isIncreasing(data, 0, data.length))
     val store = InMemoryBlockStore.create(ExecutionContext.global)
-    implicit val c = IndexTreeContext(ExecutionContext.global, store, 32, 32)
-    import c.executionContext
-    val tree5 = Await.result(IndexTree.fromLongs(data), timeout)
-    println(store)
+    implicit val c = IndexTreeContext(ExecutionContext.global, store, 32768/8, 32)
+    val tree = Await.result(IndexTree.fromLongs(data), timeout)
+    val data2 = Await.result(tree.toArray, timeout)
+    assertArrayEquals(data, data2)
+  }
+
+  def createOnDisk(data: Array[Long]) = {
+    import scala.concurrent.duration._
+    val timeout = 1.hour
+    require(ArrayUtil.isIncreasing(data, 0, data.length))
+    val file = Files.createTempDirectory("leveldb").toFile
+    val store = LevelDBBlockStore.create(file)
+    implicit val c = IndexTreeContext(ExecutionContext.global, store, 32768/8, 32)
+    val tree = Await.result(IndexTree.fromLongs(data), timeout)
+    val data2 = Await.result(tree.toArray, timeout)
+    assertArrayEquals(data, data2)
   }
 
   @Test
@@ -87,6 +102,7 @@ class IndexTreeTest {
       random,
       nonUniformRandomShort
     )
+    createOnDisk(nonUniformRandomLong)
     createQuick(nonUniformRandomLong)
     for(data <- test)
       compareCreation(data)

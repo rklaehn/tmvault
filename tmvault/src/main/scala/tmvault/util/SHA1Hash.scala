@@ -62,6 +62,12 @@ final class SHA1Hash private(private val part1: Long, private val part2: Long, p
     buffer.putInt(part3)
     buffer
   }
+
+  def toArray : Array[Byte] = {
+    val result = new Array[Byte](20)
+    copyToArray(result, 0)
+    result
+  }
 }
 
 object SHA1Hash {
