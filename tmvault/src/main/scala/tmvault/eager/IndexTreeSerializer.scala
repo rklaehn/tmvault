@@ -1,11 +1,11 @@
 package tmvault.eager
 
-import tmvault.eager.IndexTree._
+import tmvault.eager.Node._
 import tmvault.io.{BlobIterator, BlobBuilder, BlobSerializer}
 import BlobSerializer.PrimitiveSerializer._
 import tmvault.util.SHA1Hash
 
-case object IndexTreeSerializer extends BlobSerializer[IndexTree] {
+case object IndexTreeSerializer extends BlobSerializer[Node] {
 
   implicit object SHA1HashSerializer extends BlobSerializer[SHA1Hash] {
 
@@ -85,9 +85,9 @@ case object IndexTreeSerializer extends BlobSerializer[IndexTree] {
 
   val leafSeqSerializer = BlobSerializer.sequenceSerializer(LeafSerializer)
 
-  override def size(value: IndexTree): Int = leafSeqSerializer.size(value.leafs)
+  override def size(value: Node): Int = leafSeqSerializer.size(value.leafs)
 
-  override def write(value: IndexTree, target: BlobBuilder): Unit = {
+  override def write(value: Node, target: BlobBuilder): Unit = {
     val leafs = value.leafs.toArray
     //      val debug = leafs.map {
     //        case x:Data => "D"
@@ -98,7 +98,7 @@ case object IndexTreeSerializer extends BlobSerializer[IndexTree] {
     leafSeqSerializer.write(value.leafs, target)
   }
 
-  override def read(source: BlobIterator): IndexTree = {
+  override def read(source: BlobIterator): Node = {
     val leafs = leafSeqSerializer.read(source)
     leafs.reduceLeft(mergeNow)
   }
