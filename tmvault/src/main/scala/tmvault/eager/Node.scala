@@ -116,7 +116,7 @@ final case class Branch(min: Long, level: Int, left: Node, right: Node) extends 
   require(min <= left.min && left.max <= center)
   require(center <= right.min && right.max <= max)
 
-  def containsReferences = left.containsReferences || right.containsReferences
+  val containsReferences = left.containsReferences || right.containsReferences
 
   val size = left.size + right.size
 

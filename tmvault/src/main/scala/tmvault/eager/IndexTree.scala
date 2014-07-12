@@ -169,7 +169,9 @@ abstract class IndexTree {
   }
 
   def merge(a: Node, b: Node): Future[Node] = {
-    if (a.size + b.size <= maxValues) {
+    if(!a.containsReferences && !b.containsReferences)
+      Future.successful(mergeNow(a,b))
+    else if (a.size + b.size <= maxValues) {
       val temp = new Array[Long]((a.size + b.size).toInt)
       for {
         _ <- copyToArray(a, temp, 0)
