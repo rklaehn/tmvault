@@ -201,9 +201,9 @@ abstract class IndexTree {
           (al, ar) <- split(a)
           (bl, br) <- split(b)
           l <- merge(al, bl)
-          r <- merge(br, bl)
-          r <- wrap(mkBranch(l, r))
-        } yield r
+          r <- merge(ar, br)
+          result <- wrap(mkBranch(l, r))
+        } yield result
       }
     }
   }
