@@ -235,7 +235,11 @@ class IndexTreeTest {
     val node2 = trees.reduceRight(combine)
     val a = node1.get
     val b = node2.get
-    require(a == b)
+    val aa = tree.toArray(a).get
+    val ba = tree.toArray(b).get
+    assertArrayEquals(aa, ba)
+    //    if(a != b)
+    //      require(a == b)
   }
 
   @Test
