@@ -11,6 +11,8 @@ object Build extends sbt.Build {
 
   val junit_interface = "com.novocode" % "junit-interface" % "0.10" % "test"
 
+  val guava = "com.google.guava" % "guava" % "17.0"
+
   val debox = "org.spire-math" %% "debox" % "0.5.0"
 
   val scoverageSettings = scoverage.ScoverageSbtPlugin.instrumentSettings ++ (scoverage.ScoverageSbtPlugin.ScoverageKeys.highlighting := true)
@@ -41,7 +43,7 @@ object Build extends sbt.Build {
     id = "tmvault",
     base = file("tmvault"),
     settings = buildSettings ++ Seq(
-      libraryDependencies ++= Seq(akka_actor, leveldb, debox)
+      libraryDependencies ++= Seq(akka_actor, leveldb, debox, guava)
     )
   )
 }

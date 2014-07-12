@@ -1,6 +1,6 @@
 package tmvault.eager
 
-import tmvault.io.{BlockStore, BlobSerializer, ObjectStore}
+import tmvault.io.{CachingObjectStore, BlockStore, BlobSerializer, ObjectStore}
 
 import tmvault.{Future, ExecutionContext}
 import tmvault.util.ArrayUtil._
@@ -8,14 +8,22 @@ import java.lang.Long.{bitCount, highestOneBit}
 import Node._
 
 object IndexTree {
-  def create(blockStore: BlockStore, maxValues:Int = 32, maxBytes:Int = 32768)(implicit ec:ExecutionContext) : IndexTree =
-    new SimpleIndexTree(maxValues, maxBytes, blockStore, ec)
 
-  private case class SimpleIndexTree(maxValues:Int, maxBytes:Int, blockStore: BlockStore, executionContext:ExecutionContext) extends IndexTree {
+  def create(blockStore: BlockStore, maxValues:Int = 32, maxBytes:Int = 32768, useCache:Boolean = false)(implicit ec:ExecutionContext) : IndexTree =
+    new SimpleIndexTree(maxValues, maxBytes, useCache, blockStore, ec)
+
+  private case class SimpleIndexTree(maxValues:Int, maxBytes:Int, useCache:Boolean, blockStore: BlockStore, executionContext:ExecutionContext) extends IndexTree {
 
     override val serializer: BlobSerializer[Node] = IndexTreeSerializer(this)
 
-    override val objectStore: ObjectStore[Node] = ObjectStore(blockStore, serializer)(executionContext)
+    override val objectStore: ObjectStore[Node] = {
+      if(useCache)
+        CachingObjectStore(
+          ObjectStore(blockStore, serializer)(executionContext)
+        )
+      else
+        ObjectStore(blockStore, serializer)(executionContext)
+    }
   }
 }
 

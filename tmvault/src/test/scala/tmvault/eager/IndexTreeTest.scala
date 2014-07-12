@@ -48,6 +48,13 @@ object TestData {
 
 class IndexTreeTest {
 
+  def time(text:String)(action: => Unit) : Unit = {
+    val t0 = System.nanoTime()
+    action
+    val dt = System.nanoTime() - t0
+    println(text +" took " + dt / 1e9)
+  }
+
   import TestData._
 
   val timeout = 1.hour
@@ -117,21 +124,25 @@ class IndexTreeTest {
     s"rm -rf $file".!!
   }
 
-  def createFromStream(data: Iterator[Long], chunk: Int = 10000) = {
+  def createFromStream(data: Iterator[Long], chunk: Int = 10000, useCache:Boolean = false) = {
     val file = Files.createTempDirectory("leveldb").toFile
     val blockStore = LevelDBBlockStore.create(file)
-    val tree = IndexTree.create(blockStore, maxValues = 32, maxBytes = 32768)
+    val tree = IndexTree.create(blockStore, maxValues = 32, maxBytes = 32768, useCache = useCache)
     val chunks = data
       .grouped(chunk)
-      .map { x => val res = x.toArray.sortedAndDistinct; println(res.head + " " + res.last); res}
+      .map { x =>
+        val res = x.toArray.sortedAndDistinct;
+        // println(res.head + " " + res.last);
+        res
+      }
       .map(tree.fromLongs _)
     def combine(a: Future[Node], b: Future[Node]): Future[Node] = {
-      println("combine")
+      //println("combine")
       for {
         a <- a
         b <- b
         m <- {
-          println(s"merge ${a.size} ${b.size}")
+          //println(s"merge ${a.size} ${b.size}")
           tree.merge(a, b)
         }
       } yield m
@@ -176,12 +187,33 @@ class IndexTreeTest {
   }
 
   @Test
+  def testChunkedRandomCached(): Unit = {
+    val blockStore = InMemoryBlockStore.create
+    val tree = IndexTree.create(blockStore, maxValues = 32, maxBytes = 32768, useCache = true)
+    val chunks: Array[Array[Long]] = nonUniformRandom(100000).grouped(1000).map(_.sortedAndDistinct).toArray
+    val trees = chunks.map(tree.fromLongs)
+    def combine(a: Future[Node], b: Future[Node]): Future[Node] =
+      for (a <- a; b <- b; m <- tree.merge(a, b))
+      yield m
+    val node1 = trees.reduceLeft(combine)
+    val node2 = trees.reduceRight(combine)
+    val a = Await.result(node1, timeout)
+    val b = Await.result(node2, timeout)
+    require(a == b)
+  }
+
+  @Test
   def testOnDiskCreation(): Unit = {
     createOnDisk(nonUniformRandom10000000)
   }
 
   @Test
   def testOnDiskCreationHuge(): Unit = {
-    createFromStream(nonUniformRandomHuge(10000000))
+    time("testOnDiskCreationHuge") {
+      createFromStream(nonUniformRandomHuge(10000000))
+    }
+    time("testOnDiskCreationHuge cached") {
+      createFromStream(nonUniformRandomHuge(10000000), useCache = true)
+    }
   }
 }
