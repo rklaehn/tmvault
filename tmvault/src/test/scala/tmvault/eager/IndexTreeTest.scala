@@ -5,7 +5,7 @@ import java.nio.file.Files
 
 import org.junit.Assert._
 import org.junit.Test
-import tmvault.io.{ObjectStore, LevelDBBlockStore, InMemoryBlockStore}
+import tmvault.io._
 import tmvault.util.ArrayUtil
 
 import tmvault.{Future, Await}
@@ -16,15 +16,15 @@ class IndexTreeTest {
 
   @Test
   def testLeafCreation(): Unit = {
-    val leaf1 = IndexTree.mkLeaf(Array(12345L))
+    val leaf1 = Node.mkLeaf(Array(12345L))
     assertEquals(1, leaf1.width)
     assertEquals(12345L, leaf1.min)
 
-    val leaf2 = IndexTree.mkLeaf(Array(100000L))
+    val leaf2 = Node.mkLeaf(Array(100000L))
     assertEquals(1, leaf2.width)
     assertEquals(100000L, leaf2.min)
 
-    val leaf3 = IndexTree.mkLeaf(Array[Long](0x0, 0xF))
+    val leaf3 = Node.mkLeaf(Array[Long](0x0, 0xF))
     assertEquals(16, leaf3.width)
     assertEquals(0, leaf3.min)
   }
@@ -34,55 +34,52 @@ class IndexTreeTest {
   }
 
   def compareCreation(data: Array[Long]) = {
+    require(ArrayUtil.isIncreasing(data, 0, data.length))
     import scala.concurrent.duration._
     val timeout = 1.hour
-    require(ArrayUtil.isIncreasing(data, 0, data.length))
-    val blockStore = InMemoryBlockStore.create(ExecutionContext.global)
-    val objectStore = ObjectStore(blockStore, IndexTreeSerializer)(ExecutionContext.global)
-    implicit val c = IndexTreeContext(objectStore, 32, 41*4)
+    val blockStore = InMemoryBlockStore.create
+    val tree = IndexTree.create(blockStore, maxValues = 32, maxWeight = 42*4)
     val random = new scala.util.Random(0)
     val shuffled = random.shuffle(data.toIndexedSeq).toArray
     def combine(a:Future[Node], b:Future[Node]) : Future[Node] =
-      for (a <- a; b <- b; m <- IndexTree.merge(a, b))
+      for (a <- a; b <- b; m <- tree.merge(a, b))
       yield m
-    def reduceLeft(elems: Array[Long]) = elems.map(IndexTree.fromLong).reduceLeft(combine)
-    def reduceRight(elems: Array[Long]) = elems.map(IndexTree.fromLong).reduceRight(combine)
+    def reduceLeft(elems: Array[Long]) = elems.map(tree.fromLong).reduceLeft(combine)
+    def reduceRight(elems: Array[Long]) = elems.map(tree.fromLong).reduceRight(combine)
     val tree1 = Await.result(reduceLeft(data), timeout)
     val tree2 = Await.result(reduceLeft(shuffled), timeout)
     val tree3 = Await.result(reduceRight(data), timeout)
     val tree4 = Await.result(reduceRight(shuffled), timeout)
-    val tree5 = Await.result(IndexTree.fromLongs(data), timeout)
+    val tree5 = Await.result(tree.fromLongs(data), timeout)
     assertEquals(tree1, tree2)
     assertEquals(tree1, tree3)
     assertEquals(tree1, tree4)
     assertEquals(tree1, tree5)
-    println(objectStore)
+    println(tree.objectStore)
   }
 
   def createQuick(data: Array[Long]) = {
+    require(ArrayUtil.isIncreasing(data, 0, data.length))
     import scala.concurrent.duration._
     val timeout = 1.hour
-    require(ArrayUtil.isIncreasing(data, 0, data.length))
-    val blockStore = InMemoryBlockStore.create(ExecutionContext.global)
-    val objectStore = ObjectStore(blockStore, IndexTreeSerializer)(ExecutionContext.global)
-    implicit val c = IndexTreeContext(objectStore, 32768/8, 32)
-    val tree = Await.result(IndexTree.fromLongs(data), timeout)
-    val data2 = Await.result(IndexTree.toArray(tree), timeout)
+    val blockStore = InMemoryBlockStore.create
+    val tree = IndexTree.create(blockStore, maxValues = 32768/8, maxWeight = 32)
+    val node = Await.result(tree.fromLongs(data), timeout)
+    val data2 = Await.result(tree.toArray(node), timeout)
     assertArrayEquals(data, data2)
   }
 
   def createOnDisk(data: Array[Long]) = {
+    require(ArrayUtil.isIncreasing(data, 0, data.length))
     import scala.concurrent.duration._
     val timeout = 1.hour
-    require(ArrayUtil.isIncreasing(data, 0, data.length))
     val file = Files.createTempDirectory("leveldb").toFile
     val blockStore = LevelDBBlockStore.create(file)
-    val objectStore = ObjectStore(blockStore, IndexTreeSerializer)(ExecutionContext.global)
-    implicit val c = IndexTreeContext(objectStore, 32768/8, 32)
-    val tree = Await.result(IndexTree.fromLongs(data), timeout)
-    val data2 = Await.result(IndexTree.toArray(tree), timeout)
+    val tree = IndexTree.create(blockStore, maxValues = 32768/8, maxWeight = 32)
+    val node = Await.result(tree.fromLongs(data), timeout)
+    val data2 = Await.result(tree.toArray(node), timeout)
     assertArrayEquals(data, data2)
-    println(objectStore)
+    println(tree.objectStore)
   }
 
   @Test

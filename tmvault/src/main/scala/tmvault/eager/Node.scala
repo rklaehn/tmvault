@@ -4,12 +4,9 @@ import java.lang.Long.{bitCount, highestOneBit}
 
 import tmvault.util.SHA1Hash
 import tmvault.util.ArrayUtil._
-
 import scala.util.hashing.MurmurHash3
+import Node._
 
-/**
- * The concurrent but eager version of the index tree.
- */
 sealed abstract class Node {
 
   /**
@@ -59,11 +56,6 @@ sealed abstract class Node {
   def size: Long
 
   /**
-   * This is used to determine whether to place an indirection above this node
-   */
-  def weight: Int
-
-  /**
    * Copies the content of this tree to an array. This might not be possible if the tree contains references
    */
   def copyToArray(target: Array[Long], offset: Int): Unit
@@ -80,6 +72,48 @@ sealed abstract class Node {
   require(min == (min & mask))
 }
 
+object Node {
+
+  /**
+   * Returns true if a and b overlap, false if they are disjoint
+   */
+  def overlap(a: Node, b: Node): Boolean =
+    (a.min & b.mask) == (b.min & a.mask)
+
+  /**
+   * Creates a new branch node above two non-overlapping trees of arbitrary order
+   */
+  def mkBranch(a: Node, b: Node): Branch = {
+    //    if(a.isInstanceOf[Data] && b.isInstanceOf[Data])
+    //      require(!a.isInstanceOf[Data] || !b.isInstanceOf[Data])
+    require(!overlap(a, b))
+    val pivot = highestOneBit(a.min ^ b.min)
+    val mask = pivot | (pivot - 1)
+    val min = a.min & ~mask
+    val level = bitCount(mask)
+    if (a.min < b.min)
+      Branch(min, level, a, b)
+    else
+      Branch(min, level, b, a)
+  }
+
+  def mkLeaf(data: Array[Long]): Data = {
+    require(data.isIncreasing())
+    require(data(0) >= 0L)
+    if (data.length == 1)
+      Data(data(0), 0, data)
+    else {
+      val a = data(0)
+      val b = data(data.length - 1)
+      val pivot = highestOneBit(a ^ b)
+      val mask = pivot | (pivot - 1)
+      val min = a & ~mask
+      val level = bitCount(mask)
+      Data(min, level, data)
+    }
+  }
+}
+
 final case class Branch(min: Long, level: Int, left: Node, right: Node) extends Node {
   require(min <= left.min && left.max <= center)
   require(center <= right.min && right.max <= max)
@@ -87,8 +121,6 @@ final case class Branch(min: Long, level: Int, left: Node, right: Node) extends 
   def containsReferences = left.containsReferences || right.containsReferences
 
   val size = left.size + right.size
-
-  def weight = left.weight + right.weight
 
   def split = (left, right)
 
@@ -111,8 +143,6 @@ final case class Data(min: Long, level: Int, data: Array[Long]) extends Leaf {
 
   def containsReferences = false
 
-  def weight = IndexTreeSerializer.DataSerializer.size(this) + 1 // Int.MaxValue //
-
   def split: (Node, Node) = {
     if (level == 0)
       throw new UnsupportedOperationException
@@ -120,7 +150,7 @@ final case class Data(min: Long, level: Int, data: Array[Long]) extends Leaf {
     val splitIndex = data.firstIndexWhereGE(pivot)
     val left = data.takeUnboxed(splitIndex)
     val right = data.dropUnboxed(splitIndex)
-    (Data(left), Data(right))
+    (mkLeaf(left), mkLeaf(right))
   }
 
   def copyToArray(target: Array[Long], offset: Int): Unit = {
@@ -146,32 +176,9 @@ final case class Data(min: Long, level: Int, data: Array[Long]) extends Leaf {
   }
 }
 
-object Data {
-  def apply(data: Array[Long]): Data = {
-    require(data.isIncreasing())
-    require(data(0) >= 0L)
-    if (data.length == 1)
-      Data(data(0), 0, data)
-    else {
-      val a = data(0)
-      val b = data(data.length - 1)
-      val pivot = highestOneBit(a ^ b)
-      val mask = pivot | (pivot - 1)
-      val min = a & ~mask
-      val level = bitCount(mask)
-      Data(min, level, data)
-    }
-  }
-}
-
 final case class Reference(min: Long, level: Int, size: Long, hash: SHA1Hash) extends Leaf {
 
   def containsReferences = true
-
-  def weight = IndexTreeSerializer.ReferenceSerializer.size(this) + 1
-
-  def getChild(implicit c: IndexTreeContext) =
-    c.store.get(hash)
 
   def split = throw new UnsupportedOperationException
 

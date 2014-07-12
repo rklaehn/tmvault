@@ -1,12 +1,37 @@
 package tmvault.eager
 
-import scala.concurrent.Future
+import tmvault.io.{BlockStore, BlobSerializer, ObjectStore}
+
+import scala.concurrent.{ExecutionContext, Future}
 import tmvault.util.ArrayUtil._
 import java.lang.Long.{bitCount, highestOneBit}
+import Node._
 
 object IndexTree {
+  def create(blockStore: BlockStore, maxValues:Int = 32, maxWeight:Int = 32768)(implicit ec:ExecutionContext) : IndexTree =
+    new SimpleIndexTree(maxValues, maxWeight, blockStore, ec)
 
-  import scala.concurrent.ExecutionContext.Implicits.global
+  private case class SimpleIndexTree(maxValues:Int, maxWeight:Int, blockStore: BlockStore, executionContext:ExecutionContext) extends IndexTree {
+
+    override val serializer: BlobSerializer[Node] = IndexTreeSerializer(this)
+
+    override val objectStore: ObjectStore[Node] = ObjectStore(blockStore, serializer)(executionContext)
+  }
+}
+
+abstract class IndexTree {
+
+  def maxValues : Int
+
+  def maxWeight : Int
+
+  def serializer: BlobSerializer[Node]
+
+  def objectStore: ObjectStore[Node]
+
+  implicit def executionContext : ExecutionContext
+
+  def getChild(node:Reference) = objectStore.get(node.hash)
 
   /**
    * The right and left subtree of this node.
@@ -14,21 +39,21 @@ object IndexTree {
    * - In case of a reference node, these have to be retrieved from a block store
    * therefore this method returns a future
    */
-  def split(node: Node)(implicit c: IndexTreeContext): Future[(Node, Node)] = node match {
+  def split(node: Node): Future[(Node, Node)] = node match {
     case node: Data =>
       Future.successful(node.split)
     case node: Branch =>
       Future.successful(node.split)
     case node: Reference =>
       for {
-        child <- node.getChild
+        child <- getChild(node)
         (l, r) <- split(child)
         l <- wrap(l)
         r <- wrap(r)
       } yield (l, r)
   }
 
-  final def toArray(node: Node)(implicit c: IndexTreeContext): Future[Array[Long]] = {
+  final def toArray(node: Node): Future[Array[Long]] = {
     val target = new Array[Long](node.size.toInt)
     copyToArray(node, target, 0).map(_ => target)
   }
@@ -36,11 +61,11 @@ object IndexTree {
   /**
    * Converts all elements to an array. This will fail if the size of the tree is more than 2^32 elements.
    */
-  def copyToArray(node: Node, target: Array[Long], offset: Int)(implicit c: IndexTreeContext): Future[Unit] = node match {
+  def copyToArray(node: Node, target: Array[Long], offset: Int): Future[Unit] = node match {
     case node: Data =>
       Future.successful(node.copyToArray(target, offset))
     case node: Reference =>
-      node.getChild.flatMap(child => copyToArray(child, target, offset))
+      getChild(node).flatMap(child => copyToArray(child, target, offset))
     case node: Branch =>
       for {
         _ <- copyToArray(node.left, target, offset)
@@ -48,11 +73,9 @@ object IndexTree {
       } yield ()
   }
 
-  def maxValues = 64
-
   def fromLong(value: Long): Future[Node] = Future.successful(mkLeaf(Array[Long](value)))
 
-  def fromLongs(values: Array[Long])(implicit c: IndexTreeContext): Future[Node] = {
+  def fromLongs(values: Array[Long]): Future[Node] = {
     require(values.length > 0)
     require(values.isIncreasing())
     def mkNode(from: Int, until: Int): Future[Node] = {
@@ -125,8 +148,7 @@ object IndexTree {
     }
   }
 
-  def merge(a: Node, b: Node)(implicit c: IndexTreeContext): Future[Node] = {
-
+  def merge(a: Node, b: Node): Future[Node] = {
     if (a.size + b.size <= maxValues) {
       val temp = new Array[Long]((a.size + b.size).toInt)
       for {
@@ -174,55 +196,15 @@ object IndexTree {
     }
   }
 
-  /**
-   * Returns true if a and b overlap, false if they are disjoint
-   */
-  def overlap(a: Node, b: Node): Boolean =
-    (a.min & b.mask) == (b.min & a.mask)
+  def weight(node:Node) =
+    serializer.size(node)
 
-  def wrap(a: Node)(implicit c: IndexTreeContext): Future[Node] = {
-    if (a.weight < c.maxWeight)
+  def wrap(a: Node): Future[Node] = {
+    if (weight(a) < maxWeight)
       Future.successful(a)
     else
-      c.store.put(a).map { hash =>
+      objectStore.put(a).map { hash =>
         Reference(a.min, a.level, a.size, hash)
       }
   }
-
-  /**
-   * Creates a new branch node above two non-overlapping trees of arbitrary order
-   */
-  def mkBranch(a: Node, b: Node): Branch = {
-    //    if(a.isInstanceOf[Data] && b.isInstanceOf[Data])
-    //      require(!a.isInstanceOf[Data] || !b.isInstanceOf[Data])
-    require(!overlap(a, b))
-    val pivot = highestOneBit(a.min ^ b.min)
-    val mask = pivot | (pivot - 1)
-    val min = a.min & ~mask
-    val level = bitCount(mask)
-    if (a.min < b.min)
-      Branch(min, level, a, b)
-    else
-      Branch(min, level, b, a)
-  }
-
-  /**
-   * Creates a leaf from the given data
-   */
-  def mkLeaf(data: Array[Long]): Data = {
-    require(data.isIncreasing())
-    require(data(0) >= 0L)
-    if (data.length == 1)
-      Data(data(0), 0, data)
-    else {
-      val a = data(0)
-      val b = data(data.length - 1)
-      val pivot = highestOneBit(a ^ b)
-      val mask = pivot | (pivot - 1)
-      val min = a & ~mask
-      val level = bitCount(mask)
-      Data(min, level, data)
-    }
-  }
-
 }
