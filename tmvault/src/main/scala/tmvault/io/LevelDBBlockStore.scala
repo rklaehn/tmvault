@@ -10,7 +10,7 @@ import tmvault.util.SHA1Hash
 import scala.concurrent.ExecutionContext.Implicits.global
 
 object LevelDBBlockStore {
-  def create(file:File) : BlockStore = new LevelDBBlockStore(file)
+  def create(file:File) : BlockStore with AutoCloseable = new LevelDBBlockStore(file)
 
   case class LevelDBBlockStore(file:File) extends BlockStore with AutoCloseable {
 

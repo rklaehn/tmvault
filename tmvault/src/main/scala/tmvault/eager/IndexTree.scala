@@ -1,11 +1,14 @@
 package tmvault.eager
 
 import tmvault.io.{CachingObjectStore, BlockStore, BlobSerializer, ObjectStore}
+import tmvault.util.SHA1Hash
 
 import tmvault.{Future, ExecutionContext}
 import tmvault.util.ArrayUtil._
 import java.lang.Long.{bitCount, highestOneBit}
 import Node._
+
+import scala.collection.immutable.HashSet
 
 object IndexTree {
 
@@ -51,7 +54,7 @@ abstract class IndexTree {
 
   implicit def executionContext : ExecutionContext
 
-  def getChild(node:Reference) = objectStore.get(node.hash)
+  def getChild(node:Reference) : Future[Node] = objectStore.get(node.hash)
 
   /**
    * The right and left subtree of this node.
@@ -168,10 +171,26 @@ abstract class IndexTree {
     }
   }
 
+  /**
+   * Enumerates all reference hashes of this tree
+   */
+  def hashes(node:Node) : Future[HashSet[SHA1Hash]] = node match {
+    case node:Data =>
+      Future.successful(HashSet.empty[SHA1Hash])
+    case node:Reference =>
+      for {
+        child <- getChild(node)
+        h <- hashes(child)
+      } yield h + node.hash
+    case node:Branch =>
+      for {
+        l <- hashes(node.left)
+        r <- hashes(node.right)
+      } yield r union l
+  }
+
   def merge(a: Node, b: Node): Future[Node] = {
-    if(!a.containsReferences && !b.containsReferences)
-      Future.successful(mergeNow(a,b))
-    else if (a.size + b.size <= maxValues) {
+    if (a.size + b.size <= maxValues) {
       val temp = new Array[Long]((a.size + b.size).toInt)
       for {
         _ <- copyToArray(a, temp, 0)
@@ -222,7 +241,8 @@ abstract class IndexTree {
     serializer.size(node)
 
   def wrap(a: Node): Future[Node] = {
-    if (weight(a) < maxBytes)
+    if(serializer.size(a) <= maxBytes)
+    // if (a.bytes <= maxBytes)
       Future.successful(a)
     else
       objectStore.put(a).map { hash =>

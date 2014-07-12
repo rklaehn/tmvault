@@ -1,5 +1,6 @@
 package object tmvault {
 
+/*
   type Future[T] = scala.concurrent.Future[T]
 
   def Future = scala.concurrent.Future
@@ -10,7 +11,7 @@ package object tmvault {
 
   val ExecutionContext = scala.concurrent.ExecutionContext
 
-  /*
+*/
   type Future[T] = tmvault.util.Future[T]
 
   def Future = tmvault.util.Future
@@ -20,5 +21,4 @@ package object tmvault {
   type ExecutionContext = tmvault.util.ExecutionContext
 
   val ExecutionContext = tmvault.util.ExecutionContext
-  */
 }

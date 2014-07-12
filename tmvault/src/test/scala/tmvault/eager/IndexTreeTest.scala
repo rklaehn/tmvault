@@ -25,12 +25,12 @@ object TestData {
 
   def nonUniformRandom(size: Int) = {
     val random = new scala.util.Random(0)
-    (0 until size).map(_ => math.pow(10, random.nextDouble() * 10).toLong).toArray.sorted.distinct
+    (0 until size).map(_ => math.pow(10, random.nextDouble() * 10).toLong).toArray
   }
 
-  lazy val nonUniformRandom100000 = nonUniformRandom(100000)
+  lazy val nonUniformRandom100000 = nonUniformRandom(100000).sorted.distinct
 
-  lazy val nonUniformRandom10000000 = nonUniformRandom(10000000)
+  lazy val nonUniformRandom10000000 = nonUniformRandom(10000000).sorted.distinct
 
   def nonUniformRandomHuge(n: Long): Iterator[Long] = {
     val random = new scala.util.Random(0)
@@ -49,11 +49,16 @@ object TestData {
 
 class IndexTreeTest {
 
-  def time(text:String)(action: => Unit) : Unit = {
+  implicit class FutureGet[T](val f:Future[T]) {
+    def get:T = Await.result(f, 1.hour)
+  }
+
+  def time[T](text:String)(action: => T) : T = {
     val t0 = System.nanoTime()
-    action
+    val result = action
     val dt = System.nanoTime() - t0
     println(text +" took " + dt / 1e9)
+    result
   }
 
   import TestData._
@@ -90,11 +95,11 @@ class IndexTreeTest {
       yield m
     def reduceLeft(elems: Array[Long]) = elems.map(tree.fromLong).reduceLeft(combine)
     def reduceRight(elems: Array[Long]) = elems.map(tree.fromLong).reduceRight(combine)
-    val tree1 = Await.result(reduceLeft(data), timeout)
-    val tree2 = Await.result(reduceLeft(shuffled), timeout)
-    val tree3 = Await.result(reduceRight(data), timeout)
-    val tree4 = Await.result(reduceRight(shuffled), timeout)
-    val tree5 = Await.result(tree.fromLongs(data), timeout)
+    val tree1 = reduceLeft(data).get
+    val tree2 = reduceLeft(shuffled).get
+    val tree3 = reduceRight(data).get
+    val tree4 = reduceRight(shuffled).get
+    val tree5 = tree.fromLongs(data).get
     assertEquals(tree1, tree2)
     assertEquals(tree1, tree3)
     assertEquals(tree1, tree4)
@@ -106,8 +111,8 @@ class IndexTreeTest {
     require(ArrayUtil.isIncreasing(data, 0, data.length))
     val blockStore = InMemoryBlockStore.create
     val tree = IndexTree.create(blockStore, maxValues = 32, maxBytes = 32768)
-    val node = Await.result(tree.fromLongs(data), timeout)
-    val data2 = Await.result(tree.toArray(node), timeout)
+    val node = tree.fromLongs(data).get
+    val data2 = tree.toArray(node).get
     assertArrayEquals(data, data2)
     println(tree.objectStore)
   }
@@ -122,19 +127,30 @@ class IndexTreeTest {
     }
   }
 
+  def showAndDel(file:File) : Unit = {
+    try {
+      import scala.sys.process._
+      println(s"du -h $file".!!)
+      s"rm -rf $file".!!
+    } catch {
+      case e:RuntimeException =>
+        println(s"Unable to delete $file")
+    }
+  }
+
   def createOnDisk(data: Array[Long]) = {
     require(ArrayUtil.isIncreasing(data, 0, data.length))
     val file = Files.createTempDirectory("leveldb").toFile
     val blockStore = LevelDBBlockStore.create(file)
     val tree = IndexTree.create(blockStore, maxValues = 32, maxBytes = 32768)
-    val node = Await.result(tree.fromLongs(data), timeout)
-    val data2 = Await.result(tree.toArray(node), timeout)
+    val node = tree.fromLongs(data).get
+    val data2 = tree.toArray(node).get
     assertArrayEquals(data, data2)
     println(tree.objectStore)
     delTree(file)
   }
 
-  def createFromStream(data: Iterator[Long], chunk: Int = 10000, useCache:Boolean = false) = {
+  def createFromStream(data: Iterator[Long], chunk: Int = 10000, useCache:Boolean = false) : File = {
     val file = Files.createTempDirectory("leveldb").toFile
     val blockStore = LevelDBBlockStore.create(file)
     val tree = IndexTree.create(blockStore, maxValues = 32, maxBytes = 32768, useCache = useCache)
@@ -158,9 +174,12 @@ class IndexTreeTest {
       } yield m
     }
     val result = chunks.reduceLeft(combine)
-    val node = Await.result(result, timeout)
+    val node = result.get
+    val x = tree.hashes(node).get
+    blockStore.close()
     println(node.size)
-    delTree(file)
+    println(x.size)
+    file
   }
 
   @Test
@@ -190,9 +209,17 @@ class IndexTreeTest {
       yield m
     val node1 = trees.reduceLeft(combine)
     val node2 = trees.reduceRight(combine)
-    val a = Await.result(node1, timeout)
-    val b = Await.result(node2, timeout)
-    require(a == b)
+    val a = node1.get
+    val b = node2.get
+    val x = tree.hashes(a).get
+    val aa = tree.toArray(a).get
+    val ba = tree.toArray(b).get
+    assertArrayEquals(aa, ba)
+//    if(a != b)
+//      require(a == b)
+    println(a.size)
+    println(x.size)
+    println(blockStore)
   }
 
   @Test
@@ -206,8 +233,8 @@ class IndexTreeTest {
       yield m
     val node1 = trees.reduceLeft(combine)
     val node2 = trees.reduceRight(combine)
-    val a = Await.result(node1, timeout)
-    val b = Await.result(node2, timeout)
+    val a = node1.get
+    val b = node2.get
     require(a == b)
   }
 
@@ -218,11 +245,12 @@ class IndexTreeTest {
 
   @Test
   def testOnDiskCreationHuge(): Unit = {
-    time("testOnDiskCreationHuge") {
+    import scala.sys.process._
+    showAndDel(time("testOnDiskCreationHuge") {
       createFromStream(nonUniformRandomHuge(10000000))
-    }
-    time("testOnDiskCreationHuge cached") {
+    })
+    showAndDel(time("testOnDiskCreationHuge cached") {
       createFromStream(nonUniformRandomHuge(10000000), useCache = true)
-    }
+    })
   }
 }

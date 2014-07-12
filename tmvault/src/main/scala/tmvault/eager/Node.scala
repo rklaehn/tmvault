@@ -67,6 +67,8 @@ sealed abstract class Node {
     override def foreach[U](f: Leaf => U): Unit = foreachLeaf(f)
   }
 
+  def bytes: Int
+
   def foreachLeaf[U](f: Leaf => U): Unit
 
   require(min == (min & mask))
@@ -120,6 +122,8 @@ final case class Branch(min: Long, level: Int, left: Node, right: Node) extends 
 
   val size = left.size + right.size
 
+  val bytes = left.bytes + right.bytes
+
   def split = (left, right)
 
   override def copyToArray(target: Array[Long], offset: Int): Unit = {
@@ -157,6 +161,8 @@ final case class Data(min: Long, level: Int, data: Array[Long]) extends Leaf {
 
   def size = data.length
 
+  def bytes = data.length * 8 + 4 + 1
+
   override def foreachLeaf[U](f: Leaf => U): Unit = f(this)
 
   override def hashCode(): Int =
@@ -181,6 +187,8 @@ final case class Reference(min: Long, level: Int, size: Long, hash: SHA1Hash) ex
   def split = throw new UnsupportedOperationException
 
   def copyToArray(target: Array[Long], offset: Int) = throw new UnsupportedOperationException
+
+  def bytes = 20 + 8 + 8 + 4 + 1
 
   override def foreachLeaf[U](f: Leaf => U): Unit = f(this)
 }
