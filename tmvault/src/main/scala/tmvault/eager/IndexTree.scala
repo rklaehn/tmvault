@@ -141,7 +141,7 @@ object IndexTree {
   }
 
   private[eager] def mergeNow(a: IndexTree, b: IndexTree): IndexTree = {
-    if (a.size + b.size <= maxValues) {
+    if (a.size + b.size <= maxValues && !a.containsReferences && !b.containsReferences) {
       val temp = new Array[Long]((a.size + b.size).toInt)
       a.copyToArrayNow(temp, 0)
       b.copyToArrayNow(temp, a.size.toInt)
