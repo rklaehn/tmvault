@@ -12,25 +12,28 @@ trait BlockStore {
   def getBytes(key: SHA1Hash): Future[Array[Byte]]
 }
 
-object BlockStore {
+trait ObjectStore[T] {
 
-  trait Writable[T] extends Any {
+  def put(value:T) : Future[SHA1Hash]
 
-    def toByteArray(value: T) : Array[Byte]
+  def get(key:SHA1Hash) : Future[T]
+}
 
-    def fromByteArray(value: Array[Byte]) : T
-  }
+object ObjectStore {
 
-  object Implicits {
+  def apply[T](blockStore: BlockStore, serializer: BlobSerializer[T])(implicit ec: ExecutionContext): ObjectStore[T] =
+    SimpleObjectStore(blockStore, serializer)
 
-    implicit class WriteWritable(private val store: BlockStore) extends AnyVal {
-      final def put[T](value: T)(implicit w: Writable[T]): Future[SHA1Hash] = {
-        store.putBytes(w.toByteArray(value))
-      }
+  private case class SimpleObjectStore[T](blockStore: BlockStore, serializer: BlobSerializer[T])(implicit ec: ExecutionContext) extends ObjectStore[T] {
 
-      final def get[T](key: SHA1Hash)(implicit w: Writable[T], ec:ExecutionContext): Future[T] = {
-        store.getBytes(key).map(w.fromByteArray)
-      }
+    override def get(key: SHA1Hash): Future[T] =
+      blockStore.getBytes(key).map(bytes => serializer.read(BlobIterator(bytes)))
+
+    override def put(value: T): Future[SHA1Hash] = {
+      val size = serializer.size(value)
+      val builder = BlobBuilder(size)
+      serializer.write(value, builder)
+      blockStore.putBytes(builder.result)
     }
   }
 } 

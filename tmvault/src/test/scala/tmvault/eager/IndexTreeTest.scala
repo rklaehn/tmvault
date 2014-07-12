@@ -5,7 +5,7 @@ import java.nio.file.Files
 
 import org.junit.Assert._
 import org.junit.Test
-import tmvault.io.{LevelDBBlockStore, InMemoryBlockStore}
+import tmvault.io.{ObjectStore, LevelDBBlockStore, InMemoryBlockStore}
 import tmvault.util.ArrayUtil
 
 import tmvault.{Future, Await}
@@ -36,8 +36,9 @@ class IndexTreeTest {
     import scala.concurrent.duration._
     val timeout = 1.hour
     require(ArrayUtil.isIncreasing(data, 0, data.length))
-    val store = InMemoryBlockStore.create(ExecutionContext.global)
-    implicit val c = IndexTreeContext(ExecutionContext.global, store, 32, 32)
+    val blockStore = InMemoryBlockStore.create(ExecutionContext.global)
+    val objectStore = ObjectStore(blockStore, IndexTreeSerializer)(ExecutionContext.global)
+    implicit val c = IndexTreeContext(ExecutionContext.global, objectStore, 32, 41*4)
     import c.executionContext
     val random = new scala.util.Random(0)
     val shuffled = random.shuffle(data.toIndexedSeq).toArray
@@ -55,15 +56,16 @@ class IndexTreeTest {
     assertEquals(tree1, tree3)
     assertEquals(tree1, tree4)
     assertEquals(tree1, tree5)
-    println(store)
+    println(objectStore)
   }
 
   def createQuick(data: Array[Long]) = {
     import scala.concurrent.duration._
     val timeout = 1.hour
     require(ArrayUtil.isIncreasing(data, 0, data.length))
-    val store = InMemoryBlockStore.create(ExecutionContext.global)
-    implicit val c = IndexTreeContext(ExecutionContext.global, store, 32768/8, 32)
+    val blockStore = InMemoryBlockStore.create(ExecutionContext.global)
+    val objectStore = ObjectStore(blockStore, IndexTreeSerializer)(ExecutionContext.global)
+    implicit val c = IndexTreeContext(ExecutionContext.global, objectStore, 32768/8, 32)
     val tree = Await.result(IndexTree.fromLongs(data), timeout)
     val data2 = Await.result(tree.toArray, timeout)
     assertArrayEquals(data, data2)
@@ -74,11 +76,13 @@ class IndexTreeTest {
     val timeout = 1.hour
     require(ArrayUtil.isIncreasing(data, 0, data.length))
     val file = Files.createTempDirectory("leveldb").toFile
-    val store = LevelDBBlockStore.create(file)
-    implicit val c = IndexTreeContext(ExecutionContext.global, store, 32768/8, 32)
+    val blockStore = LevelDBBlockStore.create(file)
+    val objectStore = ObjectStore(blockStore, IndexTreeSerializer)(ExecutionContext.global)
+    implicit val c = IndexTreeContext(ExecutionContext.global, objectStore, 32768/8, 32)
     val tree = Await.result(IndexTree.fromLongs(data), timeout)
     val data2 = Await.result(tree.toArray, timeout)
     assertArrayEquals(data, data2)
+    println(objectStore)
   }
 
   @Test

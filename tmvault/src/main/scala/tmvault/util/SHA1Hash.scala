@@ -3,6 +3,8 @@ package tmvault.util
 import java.nio.{ByteBuffer, ByteOrder}
 import java.security.{MessageDigest, NoSuchAlgorithmException}
 
+import tmvault.io.{BlobBuilder, BlobIterator}
+
 final class SHA1Hash private(private val part1: Long, private val part2: Long, private val part3: Int) {
 
   override def hashCode = part3
@@ -55,12 +57,11 @@ final class SHA1Hash private(private val part1: Long, private val part2: Long, p
     }
   }
 
-  def write(buffer: ByteBuffer): ByteBuffer = {
-    buffer.order(ByteOrder.LITTLE_ENDIAN)
-    buffer.putLong(part1)
-    buffer.putLong(part2)
-    buffer.putInt(part3)
-    buffer
+  def write(builder: BlobBuilder): BlobBuilder = {
+    builder.putLong(part1)
+    builder.putLong(part2)
+    builder.putInt(part3)
+    builder
   }
 
   def toArray : Array[Byte] = {
@@ -78,14 +79,13 @@ object SHA1Hash {
     val digest = sha1Digest.get
     digest.reset()
     digest.update(data)
-    apply(ByteBuffer.wrap(digest.digest))
+    apply(BlobIterator(digest.digest))
   }
 
-  def apply(buffer: ByteBuffer) = {
-    buffer.order(ByteOrder.LITTLE_ENDIAN)
-    val part1 = buffer.getLong
-    val part2 = buffer.getLong
-    val part3 = buffer.getInt
+  def apply(buffer: BlobIterator) = {
+    val part1 = buffer.getLong()
+    val part2 = buffer.getLong()
+    val part3 = buffer.getInt()
     new SHA1Hash(part1, part2, part3)
   }
 
@@ -97,7 +97,7 @@ object SHA1Hash {
       bytes(i) = Integer.parseInt(text.substring(i * 2, i * 2 + 2), 16).asInstanceOf[Byte]
       i += 1
     }
-    SHA1Hash(ByteBuffer.wrap(bytes))
+    SHA1Hash(BlobIterator(bytes))
   }
 
   private val hexes = "0123456789ABCDEF".toCharArray
