@@ -1,5 +1,6 @@
 package tmvault.eager
 
+import java.io.File
 import java.nio.file.Files
 
 import org.junit.Assert._
@@ -111,6 +112,16 @@ class IndexTreeTest {
     println(tree.objectStore)
   }
 
+  def delTree(file:File) : Unit = {
+    try {
+      import scala.sys.process._
+      s"rm -rf $file".!!
+    } catch {
+      case e:RuntimeException =>
+        println(s"Unable to delete $file")
+    }
+  }
+
   def createOnDisk(data: Array[Long]) = {
     require(ArrayUtil.isIncreasing(data, 0, data.length))
     val file = Files.createTempDirectory("leveldb").toFile
@@ -120,8 +131,7 @@ class IndexTreeTest {
     val data2 = Await.result(tree.toArray(node), timeout)
     assertArrayEquals(data, data2)
     println(tree.objectStore)
-    import scala.sys.process._
-    s"rm -rf $file".!!
+    delTree(file)
   }
 
   def createFromStream(data: Iterator[Long], chunk: Int = 10000, useCache:Boolean = false) = {
@@ -150,8 +160,7 @@ class IndexTreeTest {
     val result = chunks.reduceLeft(combine)
     val node = Await.result(result, timeout)
     println(node.size)
-    import scala.sys.process._
-    s"rm -rf $file".!!
+    delTree(file)
   }
 
   @Test
