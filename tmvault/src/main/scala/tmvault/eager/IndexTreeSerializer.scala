@@ -1,6 +1,6 @@
 package tmvault.eager
 
-import tmvault.eager.Node._
+import tmvault.eager.IndexTree._
 import tmvault.io.{BlobIterator, BlobBuilder, BlobSerializer}
 import BlobSerializer.PrimitiveSerializer._
 import tmvault.util.SHA1Hash
