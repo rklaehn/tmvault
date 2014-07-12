@@ -8,10 +8,10 @@ import java.lang.Long.{bitCount, highestOneBit}
 import Node._
 
 object IndexTree {
-  def create(blockStore: BlockStore, maxValues:Int = 32, maxWeight:Int = 32768)(implicit ec:ExecutionContext) : IndexTree =
-    new SimpleIndexTree(maxValues, maxWeight, blockStore, ec)
+  def create(blockStore: BlockStore, maxValues:Int = 32, maxBytes:Int = 32768)(implicit ec:ExecutionContext) : IndexTree =
+    new SimpleIndexTree(maxValues, maxBytes, blockStore, ec)
 
-  private case class SimpleIndexTree(maxValues:Int, maxWeight:Int, blockStore: BlockStore, executionContext:ExecutionContext) extends IndexTree {
+  private case class SimpleIndexTree(maxValues:Int, maxBytes:Int, blockStore: BlockStore, executionContext:ExecutionContext) extends IndexTree {
 
     override val serializer: BlobSerializer[Node] = IndexTreeSerializer(this)
 
@@ -21,12 +21,24 @@ object IndexTree {
 
 abstract class IndexTree {
 
+  /**
+   * The maximum number of longs before a leaf node is split
+   */
   def maxValues : Int
 
-  def maxWeight : Int
+  /**
+   * The maximum number of serialized bytes before a tree is wrapped in a reference
+   */
+  def maxBytes : Int
 
+  /**
+   * The serializer that is used for calculating sizes. This should be the same one that is used for serialising values
+   */
   def serializer: BlobSerializer[Node]
 
+  /**
+   * The object store to resolve and store references with
+   */
   def objectStore: ObjectStore[Node]
 
   implicit def executionContext : ExecutionContext
@@ -200,7 +212,7 @@ abstract class IndexTree {
     serializer.size(node)
 
   def wrap(a: Node): Future[Node] = {
-    if (weight(a) < maxWeight)
+    if (weight(a) < maxBytes)
       Future.successful(a)
     else
       objectStore.put(a).map { hash =>

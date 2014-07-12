@@ -1,6 +1,5 @@
 package tmvault.eager
 
-import java.io.File
 import java.nio.file.Files
 
 import org.junit.Assert._
@@ -38,7 +37,7 @@ class IndexTreeTest {
     import scala.concurrent.duration._
     val timeout = 1.hour
     val blockStore = InMemoryBlockStore.create
-    val tree = IndexTree.create(blockStore, maxValues = 32, maxWeight = 42*4)
+    val tree = IndexTree.create(blockStore, maxValues = 32, maxBytes = 42*4)
     val random = new scala.util.Random(0)
     val shuffled = random.shuffle(data.toIndexedSeq).toArray
     def combine(a:Future[Node], b:Future[Node]) : Future[Node] =
@@ -63,10 +62,11 @@ class IndexTreeTest {
     import scala.concurrent.duration._
     val timeout = 1.hour
     val blockStore = InMemoryBlockStore.create
-    val tree = IndexTree.create(blockStore, maxValues = 32768/8, maxWeight = 32)
+    val tree = IndexTree.create(blockStore, maxValues = 32, maxBytes = 32768/8)
     val node = Await.result(tree.fromLongs(data), timeout)
     val data2 = Await.result(tree.toArray(node), timeout)
     assertArrayEquals(data, data2)
+    println(tree.objectStore)
   }
 
   def createOnDisk(data: Array[Long]) = {
@@ -75,7 +75,7 @@ class IndexTreeTest {
     val timeout = 1.hour
     val file = Files.createTempDirectory("leveldb").toFile
     val blockStore = LevelDBBlockStore.create(file)
-    val tree = IndexTree.create(blockStore, maxValues = 32768/8, maxWeight = 32)
+    val tree = IndexTree.create(blockStore, maxValues = 32, maxBytes = 32768/8)
     val node = Await.result(tree.fromLongs(data), timeout)
     val data2 = Await.result(tree.toArray(node), timeout)
     assertArrayEquals(data, data2)
@@ -94,18 +94,30 @@ class IndexTreeTest {
       val random = new scala.util.Random(0)
       (0 until 100000).map(_ => math.pow(10, random.nextDouble() *10).toLong).toArray.sorted.distinct
     }
-    val nonUniformRandomLong = {
-      val random = new scala.util.Random(0)
-      (0 until 10000000).map(_ => math.pow(10, random.nextDouble() *10).toLong).toArray.sorted.distinct
-    }
     val test = Seq(
       consecutive,
       random,
       nonUniformRandomShort
     )
-    createOnDisk(nonUniformRandomLong)
-    createQuick(nonUniformRandomLong)
     for(data <- test)
       compareCreation(data)
+  }
+
+  @Test
+  def testQuickTreeCreation() : Unit = {
+    val nonUniformRandomLong = {
+      val random = new scala.util.Random(0)
+      (0 until 10000000).map(_ => math.pow(10, random.nextDouble() *10).toLong).toArray.sorted.distinct
+    }
+    createQuick(nonUniformRandomLong)
+  }
+
+  @Test
+  def testOnDiskCreation() : Unit = {
+    val nonUniformRandomLong = {
+      val random = new scala.util.Random(0)
+      (0 until 10000000).map(_ => math.pow(10, random.nextDouble() *10).toLong).toArray.sorted.distinct
+    }
+    createOnDisk(nonUniformRandomLong)
   }
 }
