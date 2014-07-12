@@ -2,7 +2,7 @@ package tmvault.eager
 
 import tmvault.io.{BlockStore, BlobSerializer, ObjectStore}
 
-import scala.concurrent.{ExecutionContext, Future}
+import tmvault.{Future, ExecutionContext}
 import tmvault.util.ArrayUtil._
 import java.lang.Long.{bitCount, highestOneBit}
 import Node._

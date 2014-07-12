@@ -1,16 +1,20 @@
 package object tmvault {
 
-  type Future[T] = scala.concurrent.Future[T]
+  //  type Future[T] = scala.concurrent.Future[T]
+  //
+  //  def Future = scala.concurrent.Future
+  //
+  //  def Await = scala.concurrent.Await
+  //
+  //  def ExecutionContext = scala.concurrent.ExecutionContext
 
-  def Future = scala.concurrent.Future
+  type Future[T] = tmvault.util.Future[T]
 
-  def Await = scala.concurrent.Await
+  def Future = tmvault.util.Future
 
-  def ExecutionContext = scala.concurrent.ExecutionContext
+  def Await = tmvault.util.Await
 
-//  type Future[T] = tmvault.util.Future[T]
-//
-//  def Future = tmvault.util.Future
-//
-//  def Await = tmvault.util.Await
+  type ExecutionContext = tmvault.util.ExecutionContext
+
+  val ExecutionContext = tmvault.util.ExecutionContext
 }

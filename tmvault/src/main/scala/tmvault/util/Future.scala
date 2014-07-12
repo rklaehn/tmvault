@@ -21,3 +21,16 @@ object Await {
 
   def result[T](f:Future[T],d:scala.concurrent.duration.FiniteDuration) : T = f.value
 }
+
+trait ExecutionContext
+
+object ExecutionContext {
+
+  private val _global = new ExecutionContext {}
+
+  def global = _global
+
+  object Implicits {
+    implicit def global = _global
+  }
+}

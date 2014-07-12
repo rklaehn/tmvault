@@ -1,9 +1,7 @@
 package tmvault.io
 
 import tmvault.util.SHA1Hash
-import tmvault.Future
-
-import scala.concurrent.ExecutionContext
+import tmvault.{Future, ExecutionContext}
 
 trait BlockStore {
   

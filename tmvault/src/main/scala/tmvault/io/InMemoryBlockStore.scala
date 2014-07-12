@@ -1,8 +1,7 @@
 package tmvault.io
 
 import tmvault.util.SHA1Hash
-import scala.concurrent.{ExecutionContext}
-import tmvault.Future
+import tmvault.{Future, ExecutionContext}
 
 /**
  * A simple in-memory block store for testing

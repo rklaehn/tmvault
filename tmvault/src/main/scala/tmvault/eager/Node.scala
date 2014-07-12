@@ -84,8 +84,6 @@ object Node {
    * Creates a new branch node above two non-overlapping trees of arbitrary order
    */
   def mkBranch(a: Node, b: Node): Branch = {
-    //    if(a.isInstanceOf[Data] && b.isInstanceOf[Data])
-    //      require(!a.isInstanceOf[Data] || !b.isInstanceOf[Data])
     require(!overlap(a, b))
     val pivot = highestOneBit(a.min ^ b.min)
     val mask = pivot | (pivot - 1)
