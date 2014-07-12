@@ -1,5 +1,6 @@
 package tmvault.util
 
+import java.nio.charset.Charset
 import java.nio.{ByteOrder, ByteBuffer}
 
 import org.junit._
@@ -7,6 +8,90 @@ import org.junit._
 import scala.util.Random
 
 class CompressionTest {
+
+  def time[T](text:String)(action: => T) : (Double, T) = {
+    val t0 = System.nanoTime()
+    val result = action
+    val dt = System.nanoTime() - t0
+    println(text +" took " + dt / 1e9)
+    (dt/ 1e9, result)
+  }
+
+  @Test
+  def compressionSpeedTest() : Unit = {
+    import CompressionUtil._
+    val r = new Random(0)
+    val sampleData = new String(Array.fill(32768/2)(r.nextPrintableChar()))
+    println(sampleData)
+    val bytes = sampleData.getBytes(Charset.forName("UTF-8"))
+    var result = 0
+    println(bytes.length)
+    val (dt, _) = time("total") {
+      for (i <- 0 until 100) {
+        val n = 100
+        time("deflate 1") {
+          for (i <- 0 until n) {
+            result += deflate(bytes).length
+          }
+        }
+        time("deflate 2") {
+          for (i <- 0 until n) {
+            result += deflate2(bytes).length
+          }
+        }
+      }
+    }
+    println("total bytes " + result)
+    println("bytes per second " + (result / dt).toLong)
+  }
+
+  @Test
+  def decompressionSpeedTest() : Unit = {
+    import CompressionUtil._
+    val r = new Random(0)
+    val sampleData = new String(Array.fill(32768/2)(r.nextPrintableChar()))
+    println(sampleData)
+    val bytes = sampleData.getBytes(Charset.forName("UTF-8"))
+    val compressed = deflate(bytes)
+    var result = 0
+    println(bytes.length)
+    val (dt, _) = time("total") {
+      for (i <- 0 until 100) {
+        val n = 100
+        time("inflate 1") {
+          for (i <- 0 until n) {
+            result += inflate(compressed).length
+          }
+        }
+        time("inflate 2") {
+          for (i <- 0 until n) {
+            result += inflate2(compressed).length
+          }
+        }
+      }
+    }
+    println("total bytes " + result)
+    println("bytes per second " + (result / dt).toLong)
+  }
+
+  @Test
+  def hashSpeedTest() : Unit = {
+    val r = new Random(0)
+    val sampleData = new String(Array.fill(32768/2)(r.nextPrintableChar()))
+    println(sampleData)
+    val bytes = sampleData.getBytes(Charset.forName("UTF-8"))
+    var result = 0
+    var count = 0
+    println(bytes.length)
+    val (dt, _) = time("total") {
+      for (i <- 0 until 10000) {
+        result += SHA1Hash.hash(bytes).hashCode
+        count += bytes.length
+      }
+    }
+    println("total bytes " + count)
+    println("bytes per second " + (count / dt).toLong)
+  }
 
   @Test
   def deltaCompressionTest(): Unit = {
