@@ -25,6 +25,7 @@ class CompressionTest {
     println(sampleData)
     val bytes = sampleData.getBytes(Charset.forName("UTF-8"))
     var result = 0
+    var count = 0
     println(bytes.length)
     val (dt, _) = time("total") {
       for (i <- 0 until 100) {
@@ -32,17 +33,19 @@ class CompressionTest {
         time("deflate 1") {
           for (i <- 0 until n) {
             result += deflate(bytes).length
+            count += bytes.length
           }
         }
         time("deflate 2") {
           for (i <- 0 until n) {
             result += deflate2(bytes).length
+            count += bytes.length
           }
         }
       }
     }
-    println("total bytes " + result)
-    println("bytes per second " + (result / dt).toLong)
+    println("total bytes " + count)
+    println("bytes per second " + (count / dt).toLong)
   }
 
   @Test
