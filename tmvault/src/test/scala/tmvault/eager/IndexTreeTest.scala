@@ -201,8 +201,8 @@ class IndexTreeTest {
   @Test
   def testChunkedRandom(): Unit = {
     val blockStore = InMemoryBlockStore.create
-    val tree = IndexTree.create(blockStore, maxValues = 32, maxBytes = 32768)
-    val chunks: Array[Array[Long]] = nonUniformRandom(100000).grouped(1000).map(_.sortedAndDistinct).toArray
+    val tree = IndexTree.create(blockStore, maxValues = 32, maxBytes = 32768 * 1000)
+    val chunks: Array[Array[Long]] = nonUniformRandom(10000).grouped(100).map(_.sortedAndDistinct).toArray
     val trees = chunks.map(tree.fromLongs)
     def combine(a: Future[Node], b: Future[Node]): Future[Node] =
       for (a <- a; b <- b; m <- tree.merge(a, b))
@@ -215,8 +215,18 @@ class IndexTreeTest {
     val aa = tree.toArray(a).get
     val ba = tree.toArray(b).get
     assertArrayEquals(aa, ba)
-//    if(a != b)
-//      require(a == b)
+    if(a != b) {
+      tree.show(a)()
+      tree.show(b)()
+      val ad = tree.dataLeafs(a).get
+      val bd = tree.dataLeafs(b).get
+      val adc = ad.map(_.length).toIndexedSeq
+      val bdc = bd.map(_.length).toIndexedSeq
+      val zipped = ad.zip(bd).zipWithIndex
+      val diff = zipped.dropWhile { case ((a,b),i) => a == b }
+      println(diff.head)
+      require(a == b)
+    }
     println(a.size)
     println(x.size)
     println(blockStore)

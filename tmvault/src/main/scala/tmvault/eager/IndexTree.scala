@@ -6,7 +6,6 @@ import tmvault.util.SHA1Hash
 import tmvault.{Future, ExecutionContext}
 import tmvault.util.ArrayUtil._
 import java.lang.Long.{bitCount, highestOneBit}
-import Node._
 
 import scala.collection.immutable.HashSet
 
@@ -31,6 +30,7 @@ object IndexTree {
 }
 
 abstract class IndexTree {
+  import Node.overlap
 
   /**
    * The maximum number of longs before a leaf node is split
@@ -121,6 +121,27 @@ abstract class IndexTree {
     mkNode(0, values.length)
   }
 
+  def fromLongsNow(values: Array[Long]): Node = {
+    require(values.length > 0)
+    require(values.isIncreasing())
+    def mkNode(from: Int, until: Int): Node = {
+      if (until - from <= maxValues)
+        mkLeaf(values.slice(from, until))
+      else {
+        val a = values(from)
+        val b = values(until - 1)
+        val pivot = highestOneBit(a ^ b)
+        val mask = pivot - 1
+        val center = b & ~mask
+        val splitIndex = values.firstIndexWhereGE(center, from, until)
+        val left = mkNode(from, splitIndex)
+        val right = mkNode(splitIndex, until)
+        mergeNow(left, right)
+      }
+    }
+    mkNode(0, values.length)
+  }
+
   def lines(tree: Node, indent: String = "  "): Traversable[String] = new Traversable[String] {
     override def foreach[U](f: (String) => U): Unit = show(tree, indent)(x => f(x))
   }
@@ -136,29 +157,46 @@ abstract class IndexTree {
     show0(tree, indent)
   }
 
+  def concatNow(a:Node, b:Node) : Node = {
+    val temp = new Array[Long]((a.size + b.size).toInt)
+    a.copyToArray(temp, 0)
+    b.copyToArray(temp, a.size.toInt)
+    mkLeaf(temp.sortedAndDistinct)
+  }
+
+  def mergeNonOverlappingNow(a:Node, b:Node) = {
+    if (a.size + b.size <= maxValues && !a.containsReferences && !b.containsReferences) {
+      concatNow(a,b)
+    } else
+      Node.mergeNonOverlapping(a,b)
+  }
+
+  def mkLeaf(data:Array[Long]) = {
+    require(data.length <= maxValues)
+    Node.mkLeaf(data)
+  }
+
   private[eager] def mergeNow(a: Node, b: Node): Node = {
     if (a.size + b.size <= maxValues && !a.containsReferences && !b.containsReferences) {
-      val temp = new Array[Long]((a.size + b.size).toInt)
-      a.copyToArray(temp, 0)
-      b.copyToArray(temp, a.size.toInt)
-      mkLeaf(temp.sortedAndDistinct)
+      // we don't care if they overlap or not, since they have to be merged anyway
+      concatNow(a,b)
     } else if (!overlap(a, b)) {
       // the two nodes do not overlap, so we can just create a branch node above them
-      mkBranch(a, b)
+      mergeNonOverlappingNow(a, b)
     } else if (a.level > b.level) {
       // a is above b
       val (l, r) = a.split
       if (b.min < a.center)
-        mkBranch(mergeNow(l, b), r)
+        mergeNonOverlappingNow(mergeNow(l, b), r)
       else
-        mkBranch(l, mergeNow(r, b))
+        mergeNonOverlappingNow(l, mergeNow(r, b))
     } else if (a.level < b.level) {
       // b is above a
       val (l, r) = b.split
       if (a.min < b.center)
-        mkBranch(mergeNow(a, l), r)
+        mergeNonOverlappingNow(mergeNow(a, l), r)
       else
-        mkBranch(l, mergeNow(a, r))
+        mergeNonOverlappingNow(l, mergeNow(a, r))
     } else {
       // a and b have the same interval
       if (a.level == 0)
@@ -166,7 +204,7 @@ abstract class IndexTree {
       else {
         val (al, ar) = a.split
         val (bl, br) = b.split
-        mkBranch(mergeNow(al, bl), mergeNow(ar, br))
+        mergeNonOverlappingNow(mergeNow(al, bl), mergeNow(ar, br))
       }
     }
   }
@@ -189,6 +227,33 @@ abstract class IndexTree {
       } yield r union l
   }
 
+  def dataLeafs(node:Node) : Future[IndexedSeq[IndexedSeq[Long]]] = node match {
+    case node:Data =>
+      Future.successful(IndexedSeq(node.data))
+    case node:Reference =>
+      for {
+        child <- getChild(node)
+        leafs <- dataLeafs(child)
+      } yield leafs
+    case node:Branch =>
+      for {
+        l <- dataLeafs(node.left)
+        r <- dataLeafs(node.right)
+      } yield l ++ r
+  }
+
+  def mergeNonOverlapping(a: Node, b:Node) : Future[Node] = {
+    if (a.size + b.size <= maxValues) {
+      val temp = new Array[Long]((a.size + b.size).toInt)
+      for {
+        _ <- copyToArray(a, temp, 0)
+        _ <- copyToArray(b, temp, a.size.toInt)
+        r <- wrap(mkLeaf(temp.sortedAndDistinct))
+      } yield r
+    } else
+      wrap(mergeNonOverlappingNow(a,b))
+  }
+
   def merge(a: Node, b: Node): Future[Node] = {
     if (a.size + b.size <= maxValues) {
       val temp = new Array[Long]((a.size + b.size).toInt)
@@ -202,23 +267,23 @@ abstract class IndexTree {
       for {
         a <- wrap(a)
         b <- wrap(b)
-        r <- wrap(mkBranch(a, b))
+        r <- mergeNonOverlapping(a, b)
       } yield r
     } else if (a.level > b.level) {
       // a is above b
       split(a).flatMap { case (l, r) =>
         if (b.min < a.center)
-          merge(l, b).flatMap(l => wrap(mkBranch(l, r)))
+          merge(l, b).flatMap(l => mergeNonOverlapping(l, r))
         else
-          merge(r, b).flatMap(r => wrap(mkBranch(l, r)))
+          merge(r, b).flatMap(r => mergeNonOverlapping(l, r))
       }
     } else if (a.level < b.level) {
       // b is above a
       split(b).flatMap { case (l, r) =>
         if (a.min < b.center)
-          merge(a, l).flatMap(l => wrap(mkBranch(l, r)))
+          merge(a, l).flatMap(l => mergeNonOverlapping(l, r))
         else
-          merge(a, r).flatMap(r => wrap(mkBranch(l, r)))
+          merge(a, r).flatMap(r => mergeNonOverlapping(l, r))
       }
     } else {
       // a and b have the same interval
@@ -231,7 +296,7 @@ abstract class IndexTree {
           (bl, br) <- split(b)
           l <- merge(al, bl)
           r <- merge(ar, br)
-          result <- wrap(mkBranch(l, r))
+          result <- mergeNonOverlapping(l, r)
         } yield result
       }
     }

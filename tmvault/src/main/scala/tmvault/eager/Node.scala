@@ -85,7 +85,7 @@ object Node {
   /**
    * Creates a new branch node above two non-overlapping trees of arbitrary order
    */
-  def mkBranch(a: Node, b: Node): Branch = {
+  def mergeNonOverlapping(a: Node, b: Node): Branch = {
     require(!overlap(a, b))
     val pivot = highestOneBit(a.min ^ b.min)
     val mask = pivot | (pivot - 1)
@@ -142,6 +142,7 @@ final case class Branch(min: Long, level: Int, left: Node, right: Node) extends 
 sealed trait Leaf extends Node
 
 final case class Data(min: Long, level: Int, data: Array[Long]) extends Leaf {
+  require(data.isIncreasing())
 
   def containsReferences = false
 
